@@ -190,6 +190,11 @@ def track_build_log(top_path):
                 
             line = f.readline()
             if not line:
+                # Rate-limited live progress updates to Telegram even during quiet compiler phases
+                now = time.time()
+                if now - last_update >= 10:
+                    update_live_progress(top_path)
+                    last_update = now
                 if stop_requested:
                     break
                 time.sleep(0.5)
