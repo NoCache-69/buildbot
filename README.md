@@ -115,12 +115,24 @@ journalctl --user -u tg-build-bot.service -f
 ```
 *(If you used the manual fallback launcher, tail `/home/nocache/bot/daemon.log` instead.)*
 
-### Restarting the Bot
-```bash
-systemctl --user restart tg-build-bot.service
-```
+### Stopping/Killing the Bot Daemon
 
-### Stopping the Bot
+#### For systemd service (Recommended):
 ```bash
 systemctl --user stop tg-build-bot.service
+```
+
+#### For manual fallback launcher (PID pkill):
+If you started the bot manually in the background using `start_bot.sh`, stop the background processes by running:
+```bash
+pkill -f daemon.py
+```
+
+### Restarting the Bot
+```bash
+# For systemd
+systemctl --user restart tg-build-bot.service
+
+# For manual launcher
+pkill -f daemon.py && /home/nocache/bot/start_bot.sh
 ```
