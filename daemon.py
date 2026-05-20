@@ -89,6 +89,70 @@ def broadcast_message(text, parse_mode="Markdown"):
             sent_messages[chat_id] = msg_id
     return sent_messages
 
+def send_document(chat_id, file_path, caption=None):
+    token = CONFIG.get("bot_token", "YOUR_TELEGRAM_BOT_TOKEN")
+    if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
+        print("[Telegram] WARNING: Bot token is not configured in config.json", file=sys.stderr)
+        return None
+        
+    if not os.path.exists(file_path):
+        print(f"[Telegram] Error: File to upload does not exist: {file_path}", file=sys.stderr)
+        return None
+        
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    boundary = "----TelegramFormBoundary" + str(time.time())
+    
+    parts = []
+    
+    # Field: chat_id
+    parts.append(b"--" + boundary.encode('utf-8') + b"\r\n")
+    parts.append(b'Content-Disposition: form-data; name="chat_id"\r\n\r\n')
+    parts.append(str(chat_id).encode('utf-8') + b"\r\n")
+    
+    # Field: caption (if provided)
+    if caption:
+        parts.append(b"--" + boundary.encode('utf-8') + b"\r\n")
+        parts.append(b'Content-Disposition: form-data; name="caption"\r\n\r\n')
+        parts.append(caption.encode('utf-8') + b"\r\n")
+        
+    # Field: document
+    filename = os.path.basename(file_path)
+    parts.append(b"--" + boundary.encode('utf-8') + b"\r\n")
+    parts.append(f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'.encode('utf-8'))
+    parts.append(b'Content-Type: text/plain\r\n\r\n')
+    
+    try:
+        with open(file_path, 'rb') as f:
+            file_data = f.read()
+        parts.append(file_data + b"\r\n")
+    except Exception as e:
+        print(f"[Telegram] Error reading file for upload: {e}", file=sys.stderr)
+        return None
+        
+    # End boundary
+    parts.append(b"--" + boundary.encode('utf-8') + b"--\r\n")
+    
+    # Join everything into a single bytes payload
+    data = b"".join(parts)
+    
+    headers = {
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "Content-Length": str(len(data))
+    }
+    
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        print(f"[Telegram] sendDocument API call error: {e}", file=sys.stderr)
+        return None
+
+def broadcast_document(file_path, caption=None):
+    chats = CONFIG.get("subscribed_chats", [])
+    for chat_id in chats:
+        send_document(chat_id, file_path, caption)
+
 def broadcast_edit(messages_map, text, parse_mode="Markdown"):
     for chat_id, msg_id in messages_map.items():
         edit_message(chat_id, msg_id, text, parse_mode)
@@ -560,33 +624,34 @@ class APIHandler(BaseHTTPRequestHandler):
             )
             broadcast_message(success_card)
         else:
-            # Read last 25 lines of tg_build.log to extract error details
-            error_details = "Log file empty or not found."
-            try:
-                log_file_path = os.path.join(top_path, "out", "tg_build.log")
-                if os.path.exists(log_file_path):
-                    with open(log_file_path, 'r', errors='ignore') as f:
-                        lines = f.readlines()
-                        # Extract last 25 lines
-                        last_lines = [l.strip() for l in lines[-25:] if l.strip()]
-                        # Filter to look for common compiler errors or keep them as standard
-                        error_details = "\n".join(last_lines)
-            except Exception as ex:
-                error_details = f"Error opening build log: {ex}"
-                
             failure_card = (
                 f"❌ *ROM Build Failed!* 😭\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🔧 *Device:* `{ctx['device']}`\n"
                 f"⏱️ *Duration:* `{duration_str}`\n"
                 f"🛑 *Exit Code:* `{exit_code}`\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔍 *Error Log Snippet:*\n"
-                f"```\n"
-                f"{error_details[-3000:]}\n"
-                f"```"
+                f"━━━━━━━━━━━━━━━━━━━━━"
             )
             broadcast_message(failure_card)
+            
+            # Generate out/error.log from out/tg_build.log if it doesn't already exist
+            error_log_path = os.path.join(top_path, "out", "error.log")
+            if not os.path.exists(error_log_path):
+                try:
+                    log_file_path = os.path.join(top_path, "out", "tg_build.log")
+                    if os.path.exists(log_file_path):
+                        with open(log_file_path, 'r', errors='ignore') as f:
+                            lines = f.readlines()
+                        # Extract the last 1000 lines for a detailed compile trace
+                        last_lines = lines[-1000:]
+                        with open(error_log_path, 'w', errors='ignore') as f:
+                            f.writelines(last_lines)
+                except Exception as ex:
+                    print(f"Error creating out/error.log: {ex}", file=sys.stderr)
+            
+            # Broadcast the error.log document to all subscribers
+            if os.path.exists(error_log_path):
+                broadcast_document(error_log_path, caption=f"🔍 Error log trace for device `{ctx['device']}`")
             
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
