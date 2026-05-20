@@ -57,11 +57,16 @@ _tg_mka_wrapper() {
     
     python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*"
     
+    local jobs=$(nproc)
+    if [ "$USE_RBE" = "1" ]; then
+        jobs=${NINJA_REMOTE_NUM_JOBS:-2000}
+    fi
+    
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
-        script -q -e "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode -j$(nproc) "$@"
+        script -q -e "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode -j$jobs "$@"
     else
-        script -q -e "$logfile" -- make -j$(nproc) "$@"
+        script -q -e "$logfile" -- make -j$jobs "$@"
     fi
     local exit_code=$?
     
