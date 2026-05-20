@@ -24,11 +24,12 @@ _tg_m_wrapper() {
     # 4. Notify daemon about starting
     python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*"
     
-    # 5. Execute original build with pipefail and capture stdout/stderr via tee
-    (
-        set -o pipefail
-        \m "$@" 2>&1 | tee "$logfile"
-    )
+    # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
+    if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
+        script -q -e -f "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode "$@"
+    else
+        script -q -e -f "$logfile" -- make "$@"
+    fi
     local exit_code=$?
     
     # 6. Notify daemon about stopping
@@ -56,10 +57,12 @@ _tg_mka_wrapper() {
     
     python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*"
     
-    (
-        set -o pipefail
-        \mka "$@" 2>&1 | tee "$logfile"
-    )
+    # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
+    if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
+        script -q -e -f "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode -j$(nproc) "$@"
+    else
+        script -q -e -f "$logfile" -- make -j$(nproc) "$@"
+    fi
     local exit_code=$?
     
     python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
@@ -86,10 +89,12 @@ _tg_make_wrapper() {
     
     python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*"
     
-    (
-        set -o pipefail
-        \make "$@" 2>&1 | tee "$logfile"
-    )
+    # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
+    if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
+        script -q -e -f "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode "$@"
+    else
+        script -q -e -f "$logfile" -- make "$@"
+    fi
     local exit_code=$?
     
     python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"

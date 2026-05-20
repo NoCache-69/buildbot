@@ -240,6 +240,7 @@ def track_build_log(top_path):
     print(f"[Tracker] Log file found. Tailing: {logfile}")
     
     regex = re.compile(r'\[\s*(\d+)%\s+(\d+)/(\d+)\]\s*(.*)')
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     
     last_update = 0
     
@@ -264,8 +265,9 @@ def track_build_log(top_path):
                 time.sleep(0.5)
                 continue
                 
-            line = line.strip()
-            match = regex.match(line)
+            # Strip ANSI escape sequences (especially when running in a real PTY/TTY)
+            clean_line = ansi_escape.sub('', line).strip()
+            match = regex.match(clean_line)
             if match:
                 percentage = int(match.group(1))
                 completed = int(match.group(2))
