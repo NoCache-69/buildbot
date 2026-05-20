@@ -26,9 +26,9 @@ _tg_m_wrapper() {
     
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
-        script -q -e -f "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode "$@"
+        script -q -e "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode "$@"
     else
-        script -q -e -f "$logfile" -- make "$@"
+        script -q -e "$logfile" -- make "$@"
     fi
     local exit_code=$?
     
@@ -59,9 +59,9 @@ _tg_mka_wrapper() {
     
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
-        script -q -e -f "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode -j$(nproc) "$@"
+        script -q -e "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode -j$(nproc) "$@"
     else
-        script -q -e -f "$logfile" -- make -j$(nproc) "$@"
+        script -q -e "$logfile" -- make -j$(nproc) "$@"
     fi
     local exit_code=$?
     
@@ -91,9 +91,9 @@ _tg_make_wrapper() {
     
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
-        script -q -e -f "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode "$@"
+        script -q -e "$logfile" -- "$TOP/build/soong/soong_ui.bash" --make-mode "$@"
     else
-        script -q -e -f "$logfile" -- make "$@"
+        script -q -e "$logfile" -- make "$@"
     fi
     local exit_code=$?
     
