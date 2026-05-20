@@ -146,9 +146,9 @@ def get_sys_info():
             pass
             
         return (
-            f"🖥️ *CPU Load:* `{cpu_percent:.1f}%` (Cores: `{cpu_count}`, 1m avg: `{load_avg[0]:.2f}`)\n"
-            f"📟 *RAM Usage:* `{ram_used_gb:.1f} / {ram_total_gb:.1f} GB` (`{ram_percent:.1f}%`)\n"
-            f"💾 *Disk space:* `{disk_free_gb:.1f} GB` free of `{disk_total_gb:.1f} GB` (`{disk_percent:.1f}%` used)"
+            f"🖥️ CPU Load: {cpu_percent:.1f}% (Cores: {cpu_count}, 1m avg: {load_avg[0]:.2f})\n"
+            f"📟 RAM Usage: {ram_used_gb:.1f} / {ram_total_gb:.1f} GB ({ram_percent:.1f}%)\n"
+            f"💾 Disk space: {disk_free_gb:.1f} GB free of {disk_total_gb:.1f} GB ({disk_percent:.1f}% used)"
         )
     except Exception as e:
         return f"⚠️ Error getting system info: {e}"
@@ -254,18 +254,18 @@ def update_live_progress(top_path):
             
     progress_bar = make_progress_bar(percentage)
     
+    sys_stats = get_sys_info()
+    
     # Elegant live status card
     text = (
         f"📱 *AOSP Build Live Status*\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💻 *Command:* `{command}`\n"
         f"🔧 *Device:* `{device}`\n"
         f"🕒 *Elapsed Time:* `{elapsed_str}`\n"
-        f"⏳ *ETA:* `{eta_str}`\n\n"
         f"📊 *Progress:* `[{progress_bar}]` *{percentage}%*\n"
         f"⚙️ *Tasks:* `{completed:,} / {total:,}`\n"
-        f"📝 *Running:* _{action[:60] if action else 'Preparing...'}_\n"
-        f"━━━━━━━━━━━━━━━━━━━━━"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *System Info:*\n```\n{sys_stats}\n```"
     )
     
     broadcast_edit(messages_map, text)
@@ -348,28 +348,22 @@ def handle_telegram_message(msg):
             percentage = ctx["percentage"]
             progress_bar = make_progress_bar(percentage)
             
-            # Simple ETA
-            eta_str = "Calculating..."
-            if ctx["completed"] > 5 and elapsed > 5:
-                tasks_rem = ctx["total"] - ctx["completed"]
-                rate = ctx["completed"] / elapsed
-                if rate > 0:
-                    eta_str = format_duration(tasks_rem / rate)
-                    
             status_text += (
                 f"📱 *Active Build Details:*\n"
-                f"💻 *Command:* `{ctx['command']}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🔧 *Device:* `{ctx['device']}`\n"
                 f"🕒 *Elapsed:* `{elapsed_str}`\n"
-                f"⏳ *ETA:* `{eta_str}`\n"
                 f"📊 *Progress:* `[{progress_bar}]` *{percentage}%*\n"
-                f"⚙️ *Tasks:* `{ctx['completed']:,} / {ctx['total']:,}`\n\n"
+                f"⚙️ *Tasks:* `{ctx['completed']:,} / {ctx['total']:,}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
             )
+        sys_info = get_sys_info()
+        status_text += f"\n📊 *System Info:*\n```\n{sys_info}\n```"
         send_message(chat_id, status_text)
         
     elif text.startswith("/sysinfo"):
         sys_info = get_sys_info()
-        send_message(chat_id, f"🖥️ *Build Server Stats:*\n━━━━━━━━━━━━━━━━━━━━━\n{sys_info}")
+        send_message(chat_id, f"🖥️ *Build Server Stats:*\n━━━━━━━━━━━━━━━━━━━━━\n```\n{sys_info}\n```")
         
     elif text.startswith("/history"):
         history = CONFIG.get("history", [])
@@ -437,12 +431,11 @@ class APIHandler(BaseHTTPRequestHandler):
         notify_text = (
             f"🚀 *New ROM Build Initiated!*\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💻 *Command:* `{command}`\n"
-            f"🔧 *Target Device:* `{device}`\n"
+            f"🔧 *Device:* `{device}`\n"
             f"📂 *AOSP Path:* `{os.path.basename(top_path)}`\n"
             f"📅 *Started:* `{start_time_str}`\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 *Current server load:*\n{sys_stats}"
+            f"📊 *System Info:*\n```\n{sys_stats}\n```"
         )
         
         messages_map = broadcast_message(notify_text)
@@ -560,8 +553,7 @@ class APIHandler(BaseHTTPRequestHandler):
             success_card = (
                 f"✅ *ROM Build Finished Successfully!* 🎉\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Target Device:* `{ctx['device']}`\n"
-                f"💻 *Command:* `{ctx['command']}`\n"
+                f"🔧 *Device:* `{ctx['device']}`\n"
                 f"⏱️ *Build Duration:* `{duration_str}`\n"
                 f"{zip_info}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━"
@@ -585,8 +577,7 @@ class APIHandler(BaseHTTPRequestHandler):
             failure_card = (
                 f"❌ *ROM Build Failed!* 😭\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Target Device:* `{ctx['device']}`\n"
-                f"💻 *Command:* `{ctx['command']}`\n"
+                f"🔧 *Device:* `{ctx['device']}`\n"
                 f"⏱️ *Duration:* `{duration_str}`\n"
                 f"🛑 *Exit Code:* `{exit_code}`\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
