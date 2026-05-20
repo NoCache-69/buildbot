@@ -11,7 +11,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-import psutil
+import shutil
 
 # Configuration path
 CONFIG_PATH = "/home/nocache/bot/config.json"
@@ -110,24 +110,45 @@ def format_duration(seconds):
 
 def get_sys_info():
     try:
-        cpu_percent = psutil.cpu_percent(interval=None)
-        cpu_count = psutil.cpu_count()
-        load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
+        # CPU Info (Standard Library)
+        cpu_count = os.cpu_count() or 1
+        load_avg = os.getloadavg() if hasattr(os, "getloadavg") else (0.0, 0.0, 0.0)
+        # Approximate CPU percent from 1-minute load average
+        cpu_percent = min(100.0, (load_avg[0] / cpu_count) * 100.0)
         
-        virtual_mem = psutil.virtual_memory()
-        ram_used = virtual_mem.used / (1024**3)
-        ram_total = virtual_mem.total / (1024**3)
-        ram_percent = virtual_mem.percent
-        
-        disk = psutil.disk_usage('/')
-        disk_free = disk.free / (1024**3)
-        disk_total = disk.total / (1024**3)
-        disk_percent = disk.percent
-        
+        # RAM Info (Linux proc filesystem parsing - zero-dependency)
+        ram_total_gb, ram_used_gb, ram_percent = 0.0, 0.0, 0.0
+        try:
+            mem_total, mem_available = 0, 0
+            if os.path.exists('/proc/meminfo'):
+                with open('/proc/meminfo', 'r') as f:
+                    for line in f:
+                        if line.startswith('MemTotal:'):
+                            mem_total = int(line.split()[1]) * 1024 # KB to Bytes
+                        elif line.startswith('MemAvailable:'):
+                            mem_available = int(line.split()[1]) * 1024
+                if mem_total > 0:
+                    mem_used = mem_total - mem_available
+                    ram_total_gb = mem_total / (1024**3)
+                    ram_used_gb = mem_used / (1024**3)
+                    ram_percent = (mem_used / mem_total) * 100.0
+        except Exception:
+            pass
+            
+        # Disk Info (Standard Library shutil)
+        disk_total_gb, disk_free_gb, disk_percent = 0.0, 0.0, 0.0
+        try:
+            total, used, free = shutil.disk_usage('/')
+            disk_total_gb = total / (1024**3)
+            disk_free_gb = free / (1024**3)
+            disk_percent = (used / total) * 100.0 if total > 0 else 0.0
+        except Exception:
+            pass
+            
         return (
-            f"🖥️ *CPU Load:* `{cpu_percent}%` (Cores: `{cpu_count}`, 1m avg: `{load_avg[0]:.2f}`)\n"
-            f"📟 *RAM Usage:* `{ram_used:.1f} / {ram_total:.1f} GB` (`{ram_percent}%`)\n"
-            f"💾 *Disk space:* `{disk_free:.1f} GB` free of `{disk_total:.1f} GB` (`{disk_percent}%` used)"
+            f"🖥️ *CPU Load:* `{cpu_percent:.1f}%` (Cores: `{cpu_count}`, 1m avg: `{load_avg[0]:.2f}`)\n"
+            f"📟 *RAM Usage:* `{ram_used_gb:.1f} / {ram_total_gb:.1f} GB` (`{ram_percent:.1f}%`)\n"
+            f"💾 *Disk space:* `{disk_free_gb:.1f} GB` free of `{disk_total_gb:.1f} GB` (`{disk_percent:.1f}%` used)"
         )
     except Exception as e:
         return f"⚠️ Error getting system info: {e}"
