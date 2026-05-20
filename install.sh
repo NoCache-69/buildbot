@@ -94,4 +94,3 @@ echo "      source $BOT_DIR/tg_hooks.sh"
 echo "    Then reload your terminal: 'source ~/.bashrc'"
 echo ""
 echo "--------------------------------------------------"
-EOF
