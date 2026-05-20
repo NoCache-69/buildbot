@@ -117,16 +117,21 @@ journalctl --user -u tg-build-bot.service -f
 
 ### Stopping/Killing the Bot Daemon
 
-#### For systemd service (Recommended):
+#### ⚡ Easy Stop Utility (Recommended):
+You can stop the bot (whether running via systemd or the manual fallback script) in one simple command using the provided utility:
 ```bash
-systemctl --user stop tg-build-bot.service
+/home/nocache/bot/kill.sh
 ```
 
-#### For manual fallback launcher (PID pkill):
-If you started the bot manually in the background using `start_bot.sh`, stop the background processes by running:
-```bash
-pkill -f daemon.py
-```
+#### Manual Methods:
+* **For systemd service**:
+  ```bash
+  systemctl --user stop tg-build-bot.service
+  ```
+* **For manual background launcher**:
+  ```bash
+  pkill -f daemon.py
+  ```
 
 ### Restarting the Bot
 ```bash
@@ -134,5 +139,5 @@ pkill -f daemon.py
 systemctl --user restart tg-build-bot.service
 
 # For manual launcher
-pkill -f daemon.py && /home/nocache/bot/start_bot.sh
+/home/nocache/bot/kill.sh && /home/nocache/bot/start_bot.sh
 ```

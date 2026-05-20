@@ -15,6 +15,7 @@ echo "=================================================="
 echo "📁 Setting file permissions..."
 chmod +x "$BOT_DIR/daemon.py"
 chmod +x "$BOT_DIR/cli.py"
+chmod +x "$BOT_DIR/kill.sh"
 
 # 2. Check and initialize config.json if not present
 if [ ! -f "$CONFIG_FILE" ]; then
