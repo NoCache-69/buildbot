@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import shutil
+import subprocess
 
 # Configuration path
 CONFIG_PATH = "/home/nocache/bot/config.json"
@@ -42,6 +43,46 @@ def save_config(config):
             json.dump(config, f, indent=4)
     except Exception as e:
         print(f"Error saving config: {e}", file=sys.stderr)
+
+def upload_to_gofile(file_path):
+    if not os.path.exists(file_path):
+        print(f"[Gofile] Error: file not found: {file_path}", file=sys.stderr)
+        return None
+    try:
+        # Get server list
+        url = "https://api.gofile.io/servers"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+        
+        if res_data.get("status") == "ok":
+            servers = res_data.get("data", {}).get("servers", [])
+            if servers:
+                # Use the last server in the list as in the bash script
+                server = servers[-1]["name"]
+            else:
+                server = "store1" # fallback
+        else:
+            server = "store1"
+            
+        print(f"[Gofile] Selected server node: {server}")
+        
+        # Run curl in subprocess to avoid huge memory usage on python
+        cmd = ["curl", "-s", "-X", "POST", f"https://{server}.gofile.io/contents/uploadfile", "-F", f"file=@{file_path}"]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            resp = json.loads(result.stdout)
+            if resp.get("status") == "ok":
+                link = resp.get("data", {}).get("downloadPage")
+                print(f"[Gofile] Uploaded {file_path} successfully: {link}")
+                return link
+            else:
+                print(f"[Gofile] Upload API error for {file_path}: {resp}", file=sys.stderr)
+        else:
+            print(f"[Gofile] Curl failed for {file_path} with code {result.returncode}: {result.stderr}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Gofile] Exception uploading {file_path}: {e}", file=sys.stderr)
+    return None
 
 # Global variables
 CONFIG = load_config()
@@ -429,6 +470,259 @@ def handle_telegram_message(msg):
         sys_info = get_sys_info()
         send_message(chat_id, f"🖥️ *Build Server Stats:*\n━━━━━━━━━━━━━━━━━━━━━\n```\n{sys_info}\n```")
 
+def process_post_build(top_path, ctx, exit_code):
+    # Give a small 1.5 second window for log writing to catch up and parser to capture final lines
+    time.sleep(1.5)
+    
+    # Calculate duration
+    duration = time.time() - ctx["start_time"]
+    duration_str = format_duration(duration)
+    
+    # Determine status
+    status = "SUCCESS" if exit_code == 0 else "FAILED"
+    
+    # Delete the pinned live updates message so we don't clutter the chat
+    for chat_id, msg_id in ctx["messages"].items():
+        try:
+            delete_message(chat_id, msg_id)
+        except Exception:
+            pass
+            
+    if status == "SUCCESS":
+        # Send initial success status to notify the user that processing has started
+        processing_msg = broadcast_message(
+            f"✅ *ROM Build Finished Successfully!* 🎉\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔧 *Device:* `{ctx['device']}`\n"
+            f"⏱️ *Build Duration:* `{duration_str}`\n\n"
+            f"📤 *Status:* Scanning output files & preparing uploads..."
+        )
+        
+        # Let's locate the output directory using our extremely robust search logic
+        device = ctx["device"]
+        product_dir = None
+        
+        # 1. Try exact device
+        d_path = os.path.join(top_path, "out", "target", "product", device)
+        if os.path.isdir(d_path):
+            product_dir = d_path
+        # 2. Try stripped device
+        elif "_" in device:
+            d_short = device.split("_")[-1]
+            d_path_short = os.path.join(top_path, "out", "target", "product", d_short)
+            if os.path.isdir(d_path_short):
+                product_dir = d_path_short
+                
+        # 3. Fallback to scanning out/target/product/
+        if not product_dir:
+            base_product_path = os.path.join(top_path, "out", "target", "product")
+            if os.path.isdir(base_product_path):
+                try:
+                    subdirs = [os.path.join(base_product_path, d) for d in os.listdir(base_product_path) if os.path.isdir(os.path.join(base_product_path, d))]
+                    matching_dirs = []
+                    for sd in subdirs:
+                        if any(f.endswith(".zip") for f in os.listdir(sd)):
+                            matching_dirs.append(sd)
+                    if matching_dirs:
+                        product_dir = max(matching_dirs, key=os.path.getmtime)
+                except Exception as e:
+                    print(f"[Post-Build] Exception scanning base product path: {e}", file=sys.stderr)
+                    
+        if not product_dir:
+            # Fallback output if out directory couldn't be discovered at all
+            failed_card = (
+                f"✅ *ROM Build Finished Successfully!* 🎉\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔧 *Device:* `{device}`\n"
+                f"⏱️ *Build Duration:* `{duration_str}`\n"
+                f"❌ *Output Error:* Could not locate build output directory under `out/target/product/`."
+            )
+            broadcast_edit(processing_msg, failed_card)
+            return
+            
+        print(f"[Post-Build] Located product directory: {product_dir}")
+        
+        # Detect ZIP file
+        rom_zip = None
+        try:
+            zip_files = []
+            for f in os.listdir(product_dir):
+                if f.endswith(".zip") and not "ota" in f.lower() and not "target_files" in f.lower():
+                    zip_files.append(os.path.join(product_dir, f))
+            if zip_files:
+                rom_zip = max(zip_files, key=os.path.getmtime)
+        except Exception as e:
+            print(f"[Post-Build] Exception scanning ZIP files: {e}", file=sys.stderr)
+            
+        if not rom_zip:
+            failed_card = (
+                f"✅ *ROM Build Finished Successfully!* 🎉\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔧 *Device:* `{device}`\n"
+                f"⏱️ *Build Duration:* `{duration_str}`\n"
+                f"❌ *Output Error:* No target ROM zip file found in `{product_dir}`."
+            )
+            broadcast_edit(processing_msg, failed_card)
+            return
+            
+        # Get md5 and size of ROM zip
+        try:
+            zname = os.path.basename(rom_zip)
+            zsize = os.path.getsize(rom_zip) / (1024**3) # GB
+            # Read md5 quickly using shell md5sum for speed
+            res_md5 = subprocess.run(["md5sum", rom_zip], capture_output=True, text=True)
+            if res_md5.returncode == 0:
+                zip_md5 = res_md5.stdout.split()[0]
+            else:
+                zip_md5 = "Unknown"
+        except Exception as e:
+            zname = os.path.basename(rom_zip)
+            zsize = 0.0
+            zip_md5 = "Error"
+            
+        # Detect OTA JSON file
+        json_file = None
+        try:
+            device_query = device.split('_')[-1] if '_' in device else device
+            json_candidates = []
+            for f in os.listdir(product_dir):
+                if f.endswith(".json") and (device.lower() in f.lower() or device_query.lower() in f.lower()):
+                    json_candidates.append(os.path.join(product_dir, f))
+            if json_candidates:
+                json_file = max(json_candidates, key=os.path.getmtime)
+            else:
+                # Search recursively under top_path/out/
+                out_dir = os.path.join(top_path, "out")
+                if os.path.isdir(out_dir):
+                    for root, dirs, files in os.walk(out_dir):
+                        for f in files:
+                            if f.endswith(".json") and (device.lower() in f.lower() or device_query.lower() in f.lower()):
+                                json_file = os.path.join(root, f)
+                                break
+                        if json_file:
+                            break
+        except Exception as e:
+            print(f"[Post-Build] Exception searching JSON: {e}", file=sys.stderr)
+
+        # Detect other files
+        upload_queue = []
+        upload_queue.append(("ROM", rom_zip))
+        
+        # boot.img
+        boot_img = os.path.join(product_dir, "boot.img")
+        if os.path.exists(boot_img):
+            upload_queue.append(("BOOT_IMG", boot_img))
+            
+        # dtbo.img
+        dtbo_img = os.path.join(product_dir, "dtbo.img")
+        if os.path.exists(dtbo_img):
+            upload_queue.append(("DTBO_IMG", dtbo_img))
+            
+        # vendor_boot.img
+        vendor_boot = os.path.join(product_dir, "vendor_boot.img")
+        if os.path.exists(vendor_boot):
+            upload_queue.append(("VENDOR_BOOT", vendor_boot))
+            
+        # recovery.img
+        recovery_img = os.path.join(product_dir, "recovery.img")
+        if os.path.exists(recovery_img):
+            upload_queue.append(("RECOVERY_IMG", recovery_img))
+            
+        # super_empty.img
+        super_empty = os.path.join(product_dir, "super_empty.img")
+        if os.path.exists(super_empty):
+            upload_queue.append(("SUPER_EMPTY", super_empty))
+            
+        # OTA JSON if found
+        if json_file and os.path.exists(json_file):
+            upload_queue.append(("OTA_JSON", json_file))
+            
+        # Map of file type -> URL
+        uploaded_urls = {}
+        
+        # Upload loop
+        for file_type, file_path in upload_queue:
+            # Update status in TG
+            current_status = (
+                f"✅ *ROM Build Finished Successfully!* 🎉\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔧 *Device:* `{device}`\n"
+                f"⏱️ *Build Duration:* `{duration_str}`\n"
+                f"📦 *Output:* `{zname}` ({zsize:.2f} GB)\n"
+                f"🧬 *MD5:* `{zip_md5}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📤 *Uploading:* `{os.path.basename(file_path)}` to Gofile..."
+            )
+            broadcast_edit(processing_msg, current_status)
+            
+            url = upload_to_gofile(file_path)
+            if url:
+                uploaded_urls[file_type] = url
+                
+        # Send final build notification card
+        links_lines = []
+        if "ROM" in uploaded_urls:
+            links_lines.append(f"📦 *ROM:* [Download]({uploaded_urls['ROM']})")
+        if "OTA_JSON" in uploaded_urls:
+            links_lines.append(f"📄 *OTA JSON:* [Download]({uploaded_urls['OTA_JSON']})")
+        if "BOOT_IMG" in uploaded_urls:
+            links_lines.append(f"🔌 *BOOT_IMG:* [Download]({uploaded_urls['BOOT_IMG']})")
+        if "DTBO_IMG" in uploaded_urls:
+            links_lines.append(f"🔌 *DTBO_IMG:* [Download]({uploaded_urls['DTBO_IMG']})")
+        if "VENDOR_BOOT" in uploaded_urls:
+            links_lines.append(f"🔌 *VENDOR_BOOT:* [Download]({uploaded_urls['VENDOR_BOOT']})")
+        if "RECOVERY_IMG" in uploaded_urls:
+            links_lines.append(f"🔌 *RECOVERY_IMG:* [Download]({uploaded_urls['RECOVERY_IMG']})")
+        if "SUPER_EMPTY" in uploaded_urls:
+            links_lines.append(f"🔌 *SUPER_EMPTY:* [Download]({uploaded_urls['SUPER_EMPTY']})")
+            
+        links_section = "\n".join(links_lines) if links_lines else "⚠️ *Upload Error:* Files failed to upload to Gofile."
+        
+        success_card = (
+            f"✅ *ROM Build Finished Successfully!* 🎉\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔧 *Device:* `{device}`\n"
+            f"⏱️ *Build Duration:* `{duration_str}`\n"
+            f"📦 *Output:* `{zname}` ({zsize:.2f} GB)\n"
+            f"🧬 *MD5:* `{zip_md5}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📥 *Gofile Upload Links:*\n"
+            f"{links_section}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━"
+        )
+        broadcast_edit(processing_msg, success_card)
+        
+    else:
+        # Failure logic
+        failure_card = (
+            f"❌ *ROM Build Failed!* 😭\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔧 *Device:* `{ctx['device']}`\n"
+            f"⏱️ *Duration:* `{duration_str}`\n"
+            f"🛑 *Exit Code:* `{exit_code}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━"
+        )
+        broadcast_message(failure_card)
+        
+        # Generate out/error.log from out/tg_build.log if it doesn't already exist
+        error_log_path = os.path.join(top_path, "out", "error.log")
+        if not os.path.exists(error_log_path):
+            try:
+                log_file_path = os.path.join(top_path, "out", "tg_build.log")
+                if os.path.exists(log_file_path):
+                    with open(log_file_path, 'r', errors='ignore') as f:
+                        lines = f.readlines()
+                    # Extract the last 1000 lines for a detailed compile trace
+                    last_lines = lines[-1000:]
+                    with open(error_log_path, 'w', errors='ignore') as f:
+                        f.writelines(last_lines)
+            except Exception as ex:
+                print(f"Error creating out/error.log: {ex}", file=sys.stderr)
+        
+        # Broadcast the error.log document to all subscribers
+        if os.path.exists(error_log_path):
+            broadcast_document(error_log_path, caption=f"🔍 Error log trace for device `{ctx['device']}`")
+
 # HTTP Server API Interface
 class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -542,85 +836,9 @@ class APIHandler(BaseHTTPRequestHandler):
             # Remove from active builds map
             del ACTIVE_BUILDS[top_path]
             
-        # Give a small 1.5 second window for log writing to catch up and parser to capture final lines
-        time.sleep(1.5)
+        # Spawn post-build processor in background thread to avoid blocking CLI
+        threading.Thread(target=process_post_build, args=(top_path, ctx, exit_code), daemon=True).start()
         
-        # Calculate duration
-        duration = time.time() - ctx["start_time"]
-        duration_str = format_duration(duration)
-        
-        # Determine status
-        status = "SUCCESS" if exit_code == 0 else "FAILED"
-        
-        # Delete the pinned live updates message so we don't clutter the chat
-        for chat_id, msg_id in ctx["messages"].items():
-            try:
-                delete_message(chat_id, msg_id)
-            except Exception:
-                pass
-                
-        # Send final build notification card
-        if status == "SUCCESS":
-            # Search for zip file
-            zip_info = "Zip file: Not found or not in standard out/ directory"
-            try:
-                # Standard out directories
-                zip_path = os.path.join(top_path, "out", "target", "product", ctx["device"], "*.zip")
-                zip_files = glob.glob(zip_path)
-                recent_zips = []
-                now = time.time()
-                for f in zip_files:
-                    if now - os.path.getmtime(f) < 1800: # 30 mins
-                        recent_zips.append(f)
-                        
-                if recent_zips:
-                    # Get the most recently modified zip file
-                    target_zip = max(recent_zips, key=os.path.getmtime)
-                    zname = os.path.basename(target_zip)
-                    zsize = os.path.getsize(target_zip) / (1024**3) # GB
-                    zip_info = f"📦 *Output:* `{zname}`\n💾 *Size:* `{zsize:.2f} GB`"
-            except Exception as ex:
-                zip_info = f"📦 *Output:* Error scanning zip file: {ex}"
-                
-            success_card = (
-                f"✅ *ROM Build Finished Successfully!* 🎉\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Device:* `{ctx['device']}`\n"
-                f"⏱️ *Build Duration:* `{duration_str}`\n"
-                f"{zip_info}\n"
-                f"━━━━━━━━━━━━━━━━━━━━━"
-            )
-            broadcast_message(success_card)
-        else:
-            failure_card = (
-                f"❌ *ROM Build Failed!* 😭\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Device:* `{ctx['device']}`\n"
-                f"⏱️ *Duration:* `{duration_str}`\n"
-                f"🛑 *Exit Code:* `{exit_code}`\n"
-                f"━━━━━━━━━━━━━━━━━━━━━"
-            )
-            broadcast_message(failure_card)
-            
-            # Generate out/error.log from out/tg_build.log if it doesn't already exist
-            error_log_path = os.path.join(top_path, "out", "error.log")
-            if not os.path.exists(error_log_path):
-                try:
-                    log_file_path = os.path.join(top_path, "out", "tg_build.log")
-                    if os.path.exists(log_file_path):
-                        with open(log_file_path, 'r', errors='ignore') as f:
-                            lines = f.readlines()
-                        # Extract the last 1000 lines for a detailed compile trace
-                        last_lines = lines[-1000:]
-                        with open(error_log_path, 'w', errors='ignore') as f:
-                            f.writelines(last_lines)
-                except Exception as ex:
-                    print(f"Error creating out/error.log: {ex}", file=sys.stderr)
-            
-            # Broadcast the error.log document to all subscribers
-            if os.path.exists(error_log_path):
-                broadcast_document(error_log_path, caption=f"🔍 Error log trace for device `{ctx['device']}`")
-            
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
