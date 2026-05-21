@@ -103,6 +103,13 @@ def telegram_api_call(method, params=None):
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             return json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = e.read().decode('utf-8')
+            print(f"[Telegram] API call HTTP error '{method}': {e.code} {e.reason} - {err_body}", file=sys.stderr)
+        except Exception:
+            print(f"[Telegram] API call HTTP error '{method}': {e.code} {e.reason}", file=sys.stderr)
+        return None
     except Exception as e:
         print(f"[Telegram] API call error '{method}': {e}", file=sys.stderr)
         return None
@@ -184,6 +191,11 @@ def escape_markdown(text):
         s = s.replace(c, f"\\{c}")
     return s
 
+def escape_html(text):
+    if text is None:
+        return ""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
 def format_configuration(ctx):
     lines = ["🔧 *Configuration:*"]
     variant = ctx.get("variant", "Unknown")
@@ -196,6 +208,22 @@ def format_configuration(ctx):
     if platform_version and platform_version != "Unknown":
         lines.append(f"  🤖 *Android Version:* *{escape_markdown(platform_version)}*")
     return "\n".join(lines)
+
+def format_configuration_html(ctx):
+    lines = ["🔧 <b>Configuration:</b>"]
+    variant = ctx.get("variant", "Unknown")
+    release = ctx.get("release", "Unknown")
+    if variant and variant != "Unknown":
+        lines.append(f"  🔹 <b>Variant:</b> <b>{escape_html(variant)}</b>")
+    if release and release != "Unknown":
+        lines.append(f"  📦 <b>Release:</b> <b>{escape_html(release)}</b>")
+    platform_version = ctx.get("platform_version")
+    if platform_version and platform_version != "Unknown":
+        lines.append(f"  🤖 <b>Android Version:</b> <b>{escape_html(platform_version)}</b>")
+    return "\n".join(lines)
+
+def make_quoted_block_html(title, text):
+    return f"<b>{title}</b>\n<pre>{escape_html(text)}</pre>"
 
 def make_progress_bar(percentage, length=15):
     filled = int(round((percentage / 100.0) * length))
@@ -508,32 +536,32 @@ def update_live_progress(top_path):
     
     # Get dynamic sys_info
     sys_stats = get_sys_info()
-    sys_info_quoted = make_quoted_block("🖥️ System info:", sys_stats)
+    sys_info_quoted = make_quoted_block_html("🖥️ System info:", sys_stats)
     
     start_time_str = get_formatted_start_time(ctx["start_time"])
     
-    rom_name_esc = escape_markdown(rom_name)
-    device_esc = escape_markdown(device)
-    start_time_esc = escape_markdown(start_time_str)
-    elapsed_esc = escape_markdown(elapsed_str)
-    percentage_esc = escape_markdown(f"{percentage:.2f}%")
-    actions_esc = escape_markdown(f"{completed}/{total}")
+    rom_name_esc = escape_html(rom_name)
+    device_esc = escape_html(device)
+    start_time_esc = escape_html(start_time_str)
+    elapsed_esc = escape_html(elapsed_str)
+    percentage_esc = escape_html(f"{percentage:.2f}%")
+    actions_esc = escape_html(f"{completed}/{total}")
     
-    config_block = format_configuration(ctx)
+    config_block = format_configuration_html(ctx)
     
     text = (
-        f"⚙️ *Build In Progress*\n"
-        f"🕒 *Started:* *{start_time_esc}*\n\n"
-        f"📀 *Rom:* *{rom_name_esc}*\n"
-        f"📱 *Device:* *{device_esc}*\n"
-        f"📈 *Progress:* *[{progress_bar}] {percentage_esc}*\n"
-        f"🛠️ *Actions:* *{actions_esc}*\n"
-        f"⏱️ *Elapsed:* *{elapsed_esc}*\n\n"
+        f"⚙️ <b>Build In Progress</b>\n"
+        f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+        f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+        f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+        f"📈 <b>Progress:</b> <b>[{progress_bar}] {percentage_esc}</b>\n"
+        f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
+        f"⏱️ <b>Elapsed:</b> <b>{elapsed_esc}</b>\n\n"
         f"{config_block}\n\n"
         f"{sys_info_quoted}"
     )
     
-    broadcast_edit(messages_map, text)
+    broadcast_edit(messages_map, text, parse_mode="HTML")
 
 # Telegram polling daemon
 def telegram_polling():
@@ -670,25 +698,26 @@ def process_post_build(top_path, ctx, exit_code):
     device = ctx["device"]
     start_time_str = get_formatted_start_time(ctx["start_time"])
     
-    rom_name_esc = escape_markdown(rom_name)
-    device_esc = escape_markdown(device)
-    start_time_esc = escape_markdown(start_time_str)
-    duration_esc = escape_markdown(duration_str)
-    actions_esc = escape_markdown(f"{ctx['completed']}/{ctx['total']}")
+    rom_name_esc = escape_html(rom_name)
+    device_esc = escape_html(device)
+    start_time_esc = escape_html(start_time_str)
+    duration_esc = escape_html(duration_str)
+    actions_esc = escape_html(f"{ctx['completed']}/{ctx['total']}")
     
-    config_block = format_configuration(ctx)
+    config_block = format_configuration_html(ctx)
             
     if status == "SUCCESS":
         # Send initial success status to notify the user that processing has started
         processing_msg = broadcast_message(
-            f"✅ *Build Completed*\n"
-            f"🕒 *Started:* *{start_time_esc}*\n\n"
-            f"📀 *Rom:* *{rom_name_esc}*\n"
-            f"📱 *Device:* *{device_esc}*\n"
-            f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
-            f"🛠️ *Actions:* *{actions_esc}*\n"
+            f"✅ <b>Build Completed</b>\n"
+            f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+            f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+            f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+            f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+            f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
             f"{config_block}\n\n"
-            f"📤 *Status:* Scanning output files & preparing uploads..."
+            f"📤 <b>Status:</b> Scanning output files &amp; preparing uploads...",
+            parse_mode="HTML"
         )
         
         # Let's locate the output directory using our extremely robust search logic
@@ -723,16 +752,16 @@ def process_post_build(top_path, ctx, exit_code):
         if not product_dir:
             # Fallback output if out directory couldn't be discovered at all
             failed_card = (
-                f"✅ *Build Completed*\n"
-                f"🕒 *Started:* *{start_time_esc}*\n\n"
-                f"📀 *Rom:* *{rom_name_esc}*\n"
-                f"📱 *Device:* *{device_esc}*\n"
-                f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
-                f"🛠️ *Actions:* *{actions_esc}*\n"
+                f"✅ <b>Build Completed</b>\n"
+                f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+                f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+                f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+                f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+                f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
                 f"{config_block}\n\n"
-                f"❌ *Output Error:* Could not locate build output directory under `out/target/product/`."
+                f"❌ <b>Output Error:</b> Could not locate build output directory under <code>out/target/product/</code>."
             )
-            broadcast_edit(processing_msg, failed_card)
+            broadcast_edit(processing_msg, failed_card, parse_mode="HTML")
             return
             
         print(f"[Post-Build] Located product directory: {product_dir}")
@@ -755,16 +784,16 @@ def process_post_build(top_path, ctx, exit_code):
             
         if not rom_zip:
             failed_card = (
-                f"✅ *Build Completed*\n"
-                f"🕒 *Started:* *{start_time_esc}*\n\n"
-                f"📀 *Rom:* *{rom_name_esc}*\n"
-                f"📱 *Device:* *{device_esc}*\n"
-                f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
-                f"🛠️ *Actions:* *{actions_esc}*\n"
+                f"✅ <b>Build Completed</b>\n"
+                f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+                f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+                f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+                f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+                f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
                 f"{config_block}\n\n"
-                f"❌ *Output Error:* No target ROM zip file found in `{product_dir}`."
+                f"❌ <b>Output Error:</b> No target ROM zip file found in <code>{escape_html(product_dir)}</code>."
             )
-            broadcast_edit(processing_msg, failed_card)
+            broadcast_edit(processing_msg, failed_card, parse_mode="HTML")
             return
             
         # Detect OTA JSON file
@@ -843,16 +872,16 @@ def process_post_build(top_path, ctx, exit_code):
         for item in files_metadata:
             # Update status in TG
             current_status = (
-                f"✅ *Build Completed*\n"
-                f"🕒 *Started:* *{start_time_esc}*\n\n"
-                f"📀 *Rom:* *{rom_name_esc}*\n"
-                f"📱 *Device:* *{device_esc}*\n"
-                f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
-                f"🛠️ *Actions:* *{actions_esc}*\n"
+                f"✅ <b>Build Completed</b>\n"
+                f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+                f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+                f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+                f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+                f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
                 f"{config_block}\n\n"
-                f"📤 *Uploading:* `{item['name']}` to Gofile..."
+                f"📤 <b>Uploading:</b> <code>{escape_html(item['name'])}</code> to Gofile..."
             )
-            broadcast_edit(processing_msg, current_status)
+            broadcast_edit(processing_msg, current_status, parse_mode="HTML")
             
             url = upload_to_gofile(item['path'])
             if url:
@@ -861,50 +890,50 @@ def process_post_build(top_path, ctx, exit_code):
         # Build files lines for collapsible quote box
         files_lines = []
         for idx, item in enumerate(files_metadata, 1):
-            files_lines.append(f"{idx}. File: {item['name']}")
-            files_lines.append(f"     Type: {item['type']} | Size: {item['size']}")
-            files_lines.append(f"     MD5: {item['md5']}")
-            files_lines.append(f"     Link: {item['link']}")
+            name_esc = escape_html(item['name'])
+            type_esc = escape_html(item['type'])
+            size_esc = escape_html(item['size'])
+            md5_esc = escape_html(item['md5'])
+            link_html = f'<a href="{escape_html(item["link"])}">{escape_html(item["link"])}</a>' if item['link'] else "<i>Upload Failed</i>"
+            
+            files_lines.append(f"<b>{idx}. File:</b> <code>{name_esc}</code>")
+            files_lines.append(f"   Type: {type_esc} | Size: {size_esc}")
+            files_lines.append(f"   MD5: <code>{md5_esc}</code>")
+            files_lines.append(f"   Link: {link_html}")
             if idx < len(files_metadata):
                 files_lines.append("") # empty line between files
                 
-        # Format as collapsible quote starting with **> and ending with ||
-        quoted_lines = ["**> Rom Files uploaded:"]
-        for line in files_lines:
-            quoted_lines.append(f"> {line}" if line else ">")
-        if len(quoted_lines) > 1:
-            quoted_lines[-1] = quoted_lines[-1] + "||"
-        else:
-            quoted_lines[0] = quoted_lines[0] + "||"
-            
-        files_quoted = "\n".join(quoted_lines)
+        files_content = "\n".join(files_lines)
         
         success_card = (
-            f"✅ *Build Completed*\n"
-            f"🕒 *Started:* *{start_time_esc}*\n\n"
-            f"📀 *Rom:* *{rom_name_esc}*\n"
-            f"📱 *Device:* *{device_esc}*\n"
-            f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
-            f"🛠️ *Actions:* *{actions_esc}*\n"
+            f"✅ <b>Build Completed</b>\n"
+            f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+            f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+            f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+            f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+            f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
             f"{config_block}\n\n"
-            f"{files_quoted}"
+            f"<blockquote expandable>\n"
+            f"<b>Rom Files uploaded:</b>\n"
+            f"{files_content}\n"
+            f"</blockquote>"
         )
-        broadcast_edit(processing_msg, success_card)
+        broadcast_edit(processing_msg, success_card, parse_mode="HTML")
         broadcast_pin(processing_msg)
         
     else:
         # Failure logic
         failure_card = (
-            f"❌ *Build Failed*\n"
-            f"🕒 *Started:* *{start_time_esc}*\n\n"
-            f"📀 *Rom:* *{rom_name_esc}*\n"
-            f"📱 *Device:* *{device_esc}*\n"
-            f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
-            f"🛠️ *Actions:* *{actions_esc} (1 failed)*\n"
+            f"❌ <b>Build Failed</b>\n"
+            f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+            f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+            f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+            f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+            f"🛠️ <b>Actions:</b> <b>{actions_esc} (1 failed)</b>\n"
             f"{config_block}\n\n"
             f"📄 Check logs for details. Error log uploaded if available."
         )
-        broadcast_message(failure_card)
+        broadcast_message(failure_card, parse_mode="HTML")
         
         # Generate out/error.log from out/tg_build.log (overwrite always)
         error_log_path = os.path.join(top_path, "out", "error.log")
@@ -1000,10 +1029,10 @@ class APIHandler(BaseHTTPRequestHandler):
         start_time_str = get_formatted_start_time(start_time_epoch)
         progress_bar = make_progress_bar(0.0, length=10)
         sys_stats = get_sys_info()
-        sys_info_quoted = make_quoted_block("🖥️ System info:", sys_stats)
-        rom_name_esc = escape_markdown(rom_name)
-        device_esc = escape_markdown(device)
-        start_time_esc = escape_markdown(start_time_str)
+        sys_info_quoted = make_quoted_block_html("🖥️ System info:", sys_stats)
+        rom_name_esc = escape_html(rom_name)
+        device_esc = escape_html(device)
+        start_time_esc = escape_html(start_time_str)
         
         ctx_temp = {
             "variant": variant,
@@ -1013,21 +1042,21 @@ class APIHandler(BaseHTTPRequestHandler):
             "target_arch": target_arch,
             "build_id": build_id
         }
-        config_block = format_configuration(ctx_temp)
+        config_block = format_configuration_html(ctx_temp)
         
         notify_text = (
-            f"⚙️ *Build In Progress*\n"
-            f"🕒 *Started:* *{start_time_esc}*\n\n"
-            f"📀 *Rom:* *{rom_name_esc}*\n"
-            f"📱 *Device:* *{device_esc}*\n"
-            f"📈 *Progress:* *[{progress_bar}] 0.00%*\n"
-            f"🛠️ *Actions:* *0/0*\n"
-            f"⏱️ *Elapsed:* *0 seconds*\n\n"
+            f"⚙️ <b>Build In Progress</b>\n"
+            f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+            f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+            f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+            f"📈 <b>Progress:</b> <b>[{progress_bar}] 0.00%</b>\n"
+            f"🛠️ <b>Actions:</b> <b>0/0</b>\n"
+            f"⏱️ <b>Elapsed:</b> <b>0 seconds</b>\n\n"
             f"{config_block}\n\n"
             f"{sys_info_quoted}"
         )
         
-        messages_map = broadcast_message(notify_text)
+        messages_map = broadcast_message(notify_text, parse_mode="HTML")
         
         with ACTIVE_BUILDS_LOCK:
             # If there's an existing tracker for this path, clean it up first
