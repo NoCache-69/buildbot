@@ -14,17 +14,35 @@ _tg_m_wrapper() {
     [ -z "$device" ] && device=$TARGET_PRODUCT
     [ -z "$device" ] && device="AOSP Device"
     
+    # 3. Capture build configuration variables
+    local variant=$TARGET_BUILD_VARIANT
+    [ -z "$variant" ] && variant="Unknown"
+    local release=$TARGET_RELEASE
+    [ -z "$release" ] && release=$TARGET_RELEASE_CONFIG
+    [ -z "$release" ] && release="Unknown"
+    
     local cmd="m $*"
     
-    # 3. Create log directory
+    # Capture additional AOSP build variables
+    local platform_ver=$PLATFORM_VERSION
+    [ -z "$platform_ver" ] && platform_ver="Unknown"
+    local target_prod=$TARGET_PRODUCT
+    [ -z "$target_prod" ] && target_prod="Unknown"
+    local target_arch=$TARGET_ARCH
+    [ -z "$target_arch" ] && target_arch="Unknown"
+    local build_id=$BUILD_ID
+    [ -z "$build_id" ] && build_id="Unknown"
+    
+    # 4. Create log directory
     mkdir -p "$TOP/out"
     local logfile="$TOP/out/tg_build.log"
     rm -f "$logfile"
     
-    # 4. Notify daemon about starting
-    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*"
+    # 5. Notify daemon about starting
+    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
+        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
-    # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
+    # 6. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
         script -q -e -c "$TOP/build/soong/soong_ui.bash --make-mode $*" "$logfile"
     else
@@ -32,7 +50,7 @@ _tg_m_wrapper() {
     fi
     local exit_code=$?
     
-    # 6. Notify daemon about stopping
+    # 7. Notify daemon about stopping
     python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
     
     return $exit_code
@@ -49,13 +67,30 @@ _tg_mka_wrapper() {
     [ -z "$device" ] && device=$TARGET_PRODUCT
     [ -z "$device" ] && device="AOSP Device"
     
+    local variant=$TARGET_BUILD_VARIANT
+    [ -z "$variant" ] && variant="Unknown"
+    local release=$TARGET_RELEASE
+    [ -z "$release" ] && release=$TARGET_RELEASE_CONFIG
+    [ -z "$release" ] && release="Unknown"
+    
     local cmd="mka $*"
+    
+    # Capture additional AOSP build variables
+    local platform_ver=$PLATFORM_VERSION
+    [ -z "$platform_ver" ] && platform_ver="Unknown"
+    local target_prod=$TARGET_PRODUCT
+    [ -z "$target_prod" ] && target_prod="Unknown"
+    local target_arch=$TARGET_ARCH
+    [ -z "$target_arch" ] && target_arch="Unknown"
+    local build_id=$BUILD_ID
+    [ -z "$build_id" ] && build_id="Unknown"
     
     mkdir -p "$TOP/out"
     local logfile="$TOP/out/tg_build.log"
     rm -f "$logfile"
     
-    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*"
+    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
+        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
     local jobs=$(nproc)
     if [ "$USE_RBE" = "1" ]; then
@@ -86,13 +121,30 @@ _tg_make_wrapper() {
     [ -z "$device" ] && device=$TARGET_PRODUCT
     [ -z "$device" ] && device="AOSP Device"
     
+    local variant=$TARGET_BUILD_VARIANT
+    [ -z "$variant" ] && variant="Unknown"
+    local release=$TARGET_RELEASE
+    [ -z "$release" ] && release=$TARGET_RELEASE_CONFIG
+    [ -z "$release" ] && release="Unknown"
+    
     local cmd="make $*"
+    
+    # Capture additional AOSP build variables
+    local platform_ver=$PLATFORM_VERSION
+    [ -z "$platform_ver" ] && platform_ver="Unknown"
+    local target_prod=$TARGET_PRODUCT
+    [ -z "$target_prod" ] && target_prod="Unknown"
+    local target_arch=$TARGET_ARCH
+    [ -z "$target_arch" ] && target_arch="Unknown"
+    local build_id=$BUILD_ID
+    [ -z "$build_id" ] && build_id="Unknown"
     
     mkdir -p "$TOP/out"
     local logfile="$TOP/out/tg_build.log"
     rm -f "$logfile"
     
-    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*"
+    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
+        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then

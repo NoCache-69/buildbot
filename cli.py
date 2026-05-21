@@ -52,6 +52,12 @@ def main():
     parser_start.add_argument("--command", required=True, help="Complete compile command used")
     parser_start.add_argument("--device", required=True, help="Target device product name")
     parser_start.add_argument("--targets", required=True, help="Specific build target goals")
+    parser_start.add_argument("--variant", default="Unknown", help="Target build variant")
+    parser_start.add_argument("--release", default="Unknown", help="Target release name")
+    parser_start.add_argument("--platform-version", default="Unknown", help="Platform/Android Version")
+    parser_start.add_argument("--target-product", default="Unknown", help="Target Product")
+    parser_start.add_argument("--target-arch", default="Unknown", help="Target Arch")
+    parser_start.add_argument("--build-id", default="Unknown", help="Build ID")
 
     # Stop command parser
     parser_stop = subparsers.add_parser("stop", help="Trigger build stop tracking")
@@ -65,7 +71,13 @@ def main():
             "top": args.top,
             "command": args.command,
             "device": args.device,
-            "targets": args.targets
+            "targets": args.targets,
+            "variant": args.variant,
+            "release": args.release,
+            "platform_version": args.platform_version,
+            "target_product": args.target_product,
+            "target_arch": args.target_arch,
+            "build_id": args.build_id
         }
         success = send_request("start", data)
         sys.exit(0 if success else 1)

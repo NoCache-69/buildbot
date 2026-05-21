@@ -165,6 +165,38 @@ def broadcast_edit(messages_map, text, parse_mode="Markdown"):
     for chat_id, msg_id in messages_map.items():
         edit_message(chat_id, msg_id, text, parse_mode)
 
+def pin_message(chat_id, message_id):
+    params = {"chat_id": chat_id, "message_id": message_id}
+    return telegram_api_call("pinChatMessage", params)
+
+def broadcast_pin(messages_map):
+    for chat_id, msg_id in messages_map.items():
+        try:
+            pin_message(chat_id, msg_id)
+        except Exception as e:
+            print(f"[Telegram] Failed to pin message {msg_id} in chat {chat_id}: {e}", file=sys.stderr)
+
+def escape_markdown(text):
+    if text is None:
+        return ""
+    s = str(text)
+    for c in ['_', '*', '`', '[']:
+        s = s.replace(c, f"\\{c}")
+    return s
+
+def format_configuration(ctx):
+    lines = ["🔧 *Configuration:*"]
+    variant = ctx.get("variant", "Unknown")
+    release = ctx.get("release", "Unknown")
+    if variant and variant != "Unknown":
+        lines.append(f"  🔹 *Variant:* *{escape_markdown(variant)}*")
+    if release and release != "Unknown":
+        lines.append(f"  📦 *Release:* *{escape_markdown(release)}*")
+    platform_version = ctx.get("platform_version")
+    if platform_version and platform_version != "Unknown":
+        lines.append(f"  🤖 *Android Version:* *{escape_markdown(platform_version)}*")
+    return "\n".join(lines)
+
 def make_progress_bar(percentage, length=15):
     filled = int(round((percentage / 100.0) * length))
     return "█" * filled + "░" * (length - filled)
@@ -179,6 +211,18 @@ def format_duration(seconds):
     elif m > 0:
         return f"{m}m {s}s"
     return f"{s}s"
+
+def get_uptime_str():
+    try:
+        with open('/proc/uptime', 'r') as f:
+            uptime_seconds = float(f.readline().split()[0])
+        h = int(uptime_seconds // 3600)
+        m = int((uptime_seconds % 3600) // 60)
+        if h > 0:
+            return f"{h}h {m}m"
+        return f"{m}m"
+    except Exception:
+        return "Unknown"
 
 def get_sys_info():
     try:
@@ -217,13 +261,156 @@ def get_sys_info():
         except Exception:
             pass
             
+        uptime_str = get_uptime_str()
+        
         return (
-            f"🖥️ CPU Load: {cpu_percent:.1f}% (Cores: {cpu_count}, 1m avg: {load_avg[0]:.2f})\n"
-            f"📟 RAM Usage: {ram_used_gb:.1f} / {ram_total_gb:.1f} GB ({ram_percent:.1f}%)\n"
-            f"💾 Disk space: {disk_free_gb:.1f} GB free of {disk_total_gb:.1f} GB ({disk_percent:.1f}% used)"
+            f"⚙️ CPU Load: {cpu_percent:.1f}% (Cores: {cpu_count}, 1m avg: {load_avg[0]:.2f})\n"
+            f"💾 RAM Usage: {ram_used_gb:.1f} / {ram_total_gb:.1f} GB ({ram_percent:.1f}%)\n"
+            f"📁 Disk Space: {disk_free_gb:.1f} GB free of {disk_total_gb:.1f} GB ({disk_percent:.1f}% used)\n"
+            f"⏳ Uptime: {uptime_str}"
         )
     except Exception as e:
-        return f"⚠️ Error getting system info: {e}"
+        return f"Error getting system info: {e}"
+
+def get_rom_name(top_path):
+    config_path = os.path.join(top_path, ".repo", "manifests.git", "config")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', errors='ignore') as f:
+                content = f.read()
+            match = re.search(r'url\s*=\s*(.*)', content)
+            if match:
+                url = match.group(1).strip()
+                if "git@" in url and ":" in url:
+                    url = url.split(":")[-1]
+                if "://" in url:
+                    url = url.split("://")[-1]
+                parts = [p for p in url.split("/") if p]
+                if parts:
+                    if "." in parts[0] or parts[0] == "git":
+                        if len(parts) > 1:
+                            org = parts[1]
+                        else:
+                            org = parts[0]
+                    else:
+                        org = parts[0]
+                    if org.endswith(".git"):
+                        org = org[:-4]
+                    if org == "Infinity-X":
+                        return "Project Infinity X"
+                    return org
+        except Exception as e:
+            print(f"[ROM Name] Error reading .repo config: {e}", file=sys.stderr)
+            
+    manifest_xml = os.path.join(top_path, ".repo", "manifest.xml")
+    if os.path.exists(manifest_xml):
+        try:
+            with open(manifest_xml, 'r', errors='ignore') as f:
+                content = f.read()
+            match = re.search(r'fetch="([^"]+)"', content)
+            if match:
+                fetch_url = match.group(1)
+                parts = [p for p in fetch_url.replace(":", "/").split("/") if p]
+                for p in parts:
+                    if p in ["github.com", "gitlab.com", "git"]:
+                        idx = parts.index(p)
+                        if idx + 1 < len(parts):
+                            org = parts[idx + 1]
+                            if org.endswith(".git"):
+                                org = org[:-4]
+                            if org == "Infinity-X":
+                                return "Project Infinity X"
+                            return org
+        except Exception:
+            pass
+            
+    return "AOSP"
+
+def get_build_vars(top_path):
+    variant = "userdebug"
+    release = "bp4a"
+    soong_vars_path = os.path.join(top_path, "out", "soong", "soong.variables")
+    if os.path.exists(soong_vars_path):
+        try:
+            with open(soong_vars_path, 'r', errors='ignore') as f:
+                data = json.load(f)
+            if "Target_build_variant" in data:
+                variant = data["Target_build_variant"]
+            if "Release_config" in data:
+                release = data["Release_config"]
+            elif "Target_release" in data:
+                release = data["Target_release"]
+            elif "Release_version" in data:
+                release = data["Release_version"]
+        except Exception as e:
+            print(f"[BuildVars] Error reading soong.variables: {e}", file=sys.stderr)
+    return variant, release
+
+def get_formatted_start_time(epoch_time):
+    local_t = time.localtime(epoch_time)
+    base_str = time.strftime("%Y-%m-%d %I:%M:%S %p", local_t)
+    is_dst = local_t.tm_isdst
+    offset_seconds = -time.altzone if is_dst else -time.timezone
+    offset_hours = offset_seconds // 3600
+    offset_mins = abs(offset_seconds % 3600) // 60
+    sign = "+" if offset_hours >= 0 else "-"
+    offset_hours = abs(offset_hours)
+    tz_str = f"UTC{sign}{offset_hours:02d}:{offset_mins:02d}"
+    return f"{base_str} {tz_str}"
+
+def format_duration_verbose(seconds):
+    seconds = int(seconds)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    parts = []
+    if h > 0:
+        parts.append(f"{h} hour" if h == 1 else f"{h} hours")
+    if m > 0:
+        parts.append(f"{m} minute" if m == 1 else f"{m} minutes")
+    if s > 0 or not parts:
+        parts.append(f"{s} second" if s == 1 else f"{s} seconds")
+    return ", ".join(parts)
+
+def make_quoted_block(title, text):
+    return f"*{title}*\n```\n{text}\n```"
+
+# get_preview_url removed
+
+def get_file_type(file_path):
+    ext = os.path.splitext(file_path)[1].upper()
+    if ext.startswith("."):
+        ext = ext[1:]
+    return ext if ext else "FILE"
+
+def format_file_size(size_bytes):
+    if size_bytes >= 1024**3:
+        val = size_bytes / (1024**3)
+        return f"{val:.2f} GiB".replace(".00", "")
+    elif size_bytes >= 1024**2:
+        val = size_bytes / (1024**2)
+        return f"{val:.2f} MiB".replace(".00", "")
+    elif size_bytes >= 1024:
+        val = size_bytes / 1024
+        return f"{val:.2f} KiB".replace(".00", "")
+    return f"{size_bytes} Bytes"
+
+def get_file_md5(file_path):
+    try:
+        res = subprocess.run(["md5sum", file_path], capture_output=True, text=True)
+        if res.returncode == 0:
+            return res.stdout.split()[0]
+    except Exception:
+        pass
+    import hashlib
+    try:
+        hash_md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    except Exception:
+        return "Unknown"
 
 # Build Tracking Loop Thread
 def track_build_log(top_path):
@@ -307,39 +494,43 @@ def update_live_progress(top_path):
         ctx = ACTIVE_BUILDS[top_path]
         
     elapsed = time.time() - ctx["start_time"]
-    elapsed_str = format_duration(elapsed)
+    elapsed_str = format_duration_verbose(elapsed)
     
     percentage = ctx["percentage"]
     completed = ctx["completed"]
     total = ctx["total"]
     action = ctx["action"]
     device = ctx["device"]
-    command = ctx["command"]
     messages_map = ctx["messages"]
+    rom_name = ctx.get("rom_name", "AOSP")
     
-    # Calculate linear ETA based on completed tasks
-    eta_str = "Calculating..."
-    if completed > 5 and elapsed > 5 and total > 0:
-        tasks_rem = total - completed
-        rate = completed / elapsed  # tasks per second
-        if rate > 0:
-            eta_seconds = tasks_rem / rate
-            eta_str = format_duration(eta_seconds)
-            
-    progress_bar = make_progress_bar(percentage)
+    progress_bar = make_progress_bar(percentage, length=10)
     
+    # Get dynamic sys_info
     sys_stats = get_sys_info()
+    sys_info_quoted = make_quoted_block("🖥️ System info:", sys_stats)
     
-    # Elegant live status card
+    start_time_str = get_formatted_start_time(ctx["start_time"])
+    
+    rom_name_esc = escape_markdown(rom_name)
+    device_esc = escape_markdown(device)
+    start_time_esc = escape_markdown(start_time_str)
+    elapsed_esc = escape_markdown(elapsed_str)
+    percentage_esc = escape_markdown(f"{percentage:.2f}%")
+    actions_esc = escape_markdown(f"{completed}/{total}")
+    
+    config_block = format_configuration(ctx)
+    
     text = (
-        f"📱 *AOSP Build Live Status*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔧 *Device:* `{device}`\n"
-        f"🕒 *Elapsed Time:* `{elapsed_str}`\n"
-        f"📊 *Progress:* `[{progress_bar}]` *{percentage}%*\n"
-        f"⚙️ *Tasks:* `{completed:,} / {total:,}`\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 *System Info:*\n```\n{sys_stats}\n```"
+        f"⚙️ *Build In Progress*\n"
+        f"🕒 *Started:* *{start_time_esc}*\n\n"
+        f"📀 *Rom:* *{rom_name_esc}*\n"
+        f"📱 *Device:* *{device_esc}*\n"
+        f"📈 *Progress:* *[{progress_bar}] {percentage_esc}*\n"
+        f"🛠️ *Actions:* *{actions_esc}*\n"
+        f"⏱️ *Elapsed:* *{elapsed_esc}*\n\n"
+        f"{config_block}\n\n"
+        f"{sys_info_quoted}"
     )
     
     broadcast_edit(messages_map, text)
@@ -421,17 +612,21 @@ def handle_telegram_message(msg):
             percentage = ctx["percentage"]
             progress_bar = make_progress_bar(percentage)
             
+            device_esc = escape_markdown(ctx['device'])
+            elapsed_esc = escape_markdown(elapsed_str)
+            tasks_esc = escape_markdown(f"{ctx['completed']:,} / {ctx['total']:,}")
+            
             status_text += (
                 f"📱 *Active Build Details:*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Device:* `{ctx['device']}`\n"
-                f"🕒 *Elapsed:* `{elapsed_str}`\n"
-                f"📊 *Progress:* `[{progress_bar}]` *{percentage}%*\n"
-                f"⚙️ *Tasks:* `{ctx['completed']:,} / {ctx['total']:,}`\n"
+                f"📱 *Device:* *{device_esc}*\n"
+                f"⏱️ *Elapsed:* *{elapsed_esc}*\n"
+                f"📈 *Progress:* `[{progress_bar}]` *{percentage}%*\n"
+                f"🛠️ *Actions:* *{tasks_esc}*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
             )
         sys_info = get_sys_info()
-        status_text += f"\n📊 *System Info:*\n```\n{sys_info}\n```"
+        status_text += f"\n🖥️ *System Info:*\n```\n{sys_info}\n```"
         send_message(chat_id, status_text)
         
     elif text.startswith("/sysinfo"):
@@ -439,12 +634,11 @@ def handle_telegram_message(msg):
         send_message(chat_id, f"🖥️ *Build Server Stats:*\n━━━━━━━━━━━━━━━━━━━━━\n```\n{sys_info}\n```")
 
 def process_post_build(top_path, ctx, exit_code):
-    # Give a small 1.5 second window for log writing to catch up and parser to capture final lines
     time.sleep(1.5)
     
     # Calculate duration
     duration = time.time() - ctx["start_time"]
-    duration_str = format_duration(duration)
+    duration_str = format_duration_verbose(duration)
     
     # Determine status
     status = "SUCCESS" if exit_code == 0 else "FAILED"
@@ -456,18 +650,48 @@ def process_post_build(top_path, ctx, exit_code):
         except Exception:
             pass
             
+    # Auto-detect ROM details as fallbacks
+    rom_name = ctx.get("rom_name")
+    if not rom_name or rom_name == "AOSP":
+        rom_name = get_rom_name(top_path)
+    variant = ctx.get("variant")
+    release = ctx.get("release")
+    if not variant or not release or variant == "Unknown" or release == "Unknown":
+        v_det, r_det = get_build_vars(top_path)
+        if not variant or variant == "Unknown":
+            variant = v_det
+        if not release or release == "Unknown":
+            release = r_det
+            
+    # Save the fallbacks back to ctx so format_configuration uses them
+    ctx["variant"] = variant
+    ctx["release"] = release
+            
+    device = ctx["device"]
+    start_time_str = get_formatted_start_time(ctx["start_time"])
+    
+    rom_name_esc = escape_markdown(rom_name)
+    device_esc = escape_markdown(device)
+    start_time_esc = escape_markdown(start_time_str)
+    duration_esc = escape_markdown(duration_str)
+    actions_esc = escape_markdown(f"{ctx['completed']}/{ctx['total']}")
+    
+    config_block = format_configuration(ctx)
+            
     if status == "SUCCESS":
         # Send initial success status to notify the user that processing has started
         processing_msg = broadcast_message(
-            f"✅ *ROM Build Finished Successfully!* 🎉\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔧 *Device:* `{ctx['device']}`\n"
-            f"⏱️ *Build Duration:* `{duration_str}`\n\n"
+            f"✅ *Build Completed*\n"
+            f"🕒 *Started:* *{start_time_esc}*\n\n"
+            f"📀 *Rom:* *{rom_name_esc}*\n"
+            f"📱 *Device:* *{device_esc}*\n"
+            f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
+            f"🛠️ *Actions:* *{actions_esc}*\n"
+            f"{config_block}\n\n"
             f"📤 *Status:* Scanning output files & preparing uploads..."
         )
         
         # Let's locate the output directory using our extremely robust search logic
-        device = ctx["device"]
         product_dir = None
         
         # 1. Try exact device
@@ -499,10 +723,13 @@ def process_post_build(top_path, ctx, exit_code):
         if not product_dir:
             # Fallback output if out directory couldn't be discovered at all
             failed_card = (
-                f"✅ *ROM Build Finished Successfully!* 🎉\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Device:* `{device}`\n"
-                f"⏱️ *Build Duration:* `{duration_str}`\n"
+                f"✅ *Build Completed*\n"
+                f"🕒 *Started:* *{start_time_esc}*\n\n"
+                f"📀 *Rom:* *{rom_name_esc}*\n"
+                f"📱 *Device:* *{device_esc}*\n"
+                f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
+                f"🛠️ *Actions:* *{actions_esc}*\n"
+                f"{config_block}\n\n"
                 f"❌ *Output Error:* Could not locate build output directory under `out/target/product/`."
             )
             broadcast_edit(processing_msg, failed_card)
@@ -510,43 +737,35 @@ def process_post_build(top_path, ctx, exit_code):
             
         print(f"[Post-Build] Located product directory: {product_dir}")
         
-        # Detect ZIP file
+        # Detect ZIP file (excluding target_files, preferring non-ota zips)
         rom_zip = None
         try:
             zip_files = []
             for f in os.listdir(product_dir):
-                if f.endswith(".zip") and not "ota" in f.lower() and not "target_files" in f.lower():
+                if f.endswith(".zip") and not "target_files" in f.lower():
                     zip_files.append(os.path.join(product_dir, f))
             if zip_files:
-                rom_zip = max(zip_files, key=os.path.getmtime)
+                non_ota = [z for z in zip_files if "ota" not in os.path.basename(z).lower()]
+                if non_ota:
+                    rom_zip = max(non_ota, key=os.path.getmtime)
+                else:
+                    rom_zip = max(zip_files, key=os.path.getmtime)
         except Exception as e:
             print(f"[Post-Build] Exception scanning ZIP files: {e}", file=sys.stderr)
             
         if not rom_zip:
             failed_card = (
-                f"✅ *ROM Build Finished Successfully!* 🎉\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Device:* `{device}`\n"
-                f"⏱️ *Build Duration:* `{duration_str}`\n"
+                f"✅ *Build Completed*\n"
+                f"🕒 *Started:* *{start_time_esc}*\n\n"
+                f"📀 *Rom:* *{rom_name_esc}*\n"
+                f"📱 *Device:* *{device_esc}*\n"
+                f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
+                f"🛠️ *Actions:* *{actions_esc}*\n"
+                f"{config_block}\n\n"
                 f"❌ *Output Error:* No target ROM zip file found in `{product_dir}`."
             )
             broadcast_edit(processing_msg, failed_card)
             return
-            
-        # Get md5 and size of ROM zip
-        try:
-            zname = os.path.basename(rom_zip)
-            zsize = os.path.getsize(rom_zip) / (1024**3) # GB
-            # Read md5 quickly using shell md5sum for speed
-            res_md5 = subprocess.run(["md5sum", rom_zip], capture_output=True, text=True)
-            if res_md5.returncode == 0:
-                zip_md5 = res_md5.stdout.split()[0]
-            else:
-                zip_md5 = "Unknown"
-        except Exception as e:
-            zname = os.path.basename(rom_zip)
-            zsize = 0.0
-            zip_md5 = "Error"
             
         # Detect OTA JSON file
         json_file = None
@@ -571,7 +790,7 @@ def process_post_build(top_path, ctx, exit_code):
                             break
         except Exception as e:
             print(f"[Post-Build] Exception searching JSON: {e}", file=sys.stderr)
-
+ 
         # Detect other files
         upload_queue = []
         upload_queue.append(("ROM", rom_zip))
@@ -581,20 +800,18 @@ def process_post_build(top_path, ctx, exit_code):
         if os.path.exists(boot_img):
             upload_queue.append(("BOOT_IMG", boot_img))
             
-        # dtbo.img
+        # dtbo.img (if exists)
         dtbo_img = os.path.join(product_dir, "dtbo.img")
         if os.path.exists(dtbo_img):
             upload_queue.append(("DTBO_IMG", dtbo_img))
             
-        # vendor_boot.img
-        vendor_boot = os.path.join(product_dir, "vendor_boot.img")
-        if os.path.exists(vendor_boot):
-            upload_queue.append(("VENDOR_BOOT", vendor_boot))
-            
-        # recovery.img
+        # recovery.img / vendor_boot.img (whichever is available)
         recovery_img = os.path.join(product_dir, "recovery.img")
+        vendor_boot = os.path.join(product_dir, "vendor_boot.img")
         if os.path.exists(recovery_img):
             upload_queue.append(("RECOVERY_IMG", recovery_img))
+        elif os.path.exists(vendor_boot):
+            upload_queue.append(("VENDOR_BOOT", vendor_boot))
             
         # super_empty.img
         super_empty = os.path.join(product_dir, "super_empty.img")
@@ -605,70 +822,87 @@ def process_post_build(top_path, ctx, exit_code):
         if json_file and os.path.exists(json_file):
             upload_queue.append(("OTA_JSON", json_file))
             
-        # Map of file type -> URL
-        uploaded_urls = {}
+        # Collect metadata first
+        files_metadata = []
+        for file_type, file_path in upload_queue:
+            fname = os.path.basename(file_path)
+            ftype = get_file_type(file_path)
+            fsize = format_file_size(os.path.getsize(file_path))
+            fmd5 = get_file_md5(file_path)
+            files_metadata.append({
+                "type_key": file_type,
+                "path": file_path,
+                "name": fname,
+                "type": ftype,
+                "size": fsize,
+                "md5": fmd5,
+                "link": ""
+            })
         
         # Upload loop
-        for file_type, file_path in upload_queue:
+        for item in files_metadata:
             # Update status in TG
             current_status = (
-                f"✅ *ROM Build Finished Successfully!* 🎉\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔧 *Device:* `{device}`\n"
-                f"⏱️ *Build Duration:* `{duration_str}`\n"
-                f"📦 *Output:* `{zname}` ({zsize:.2f} GB)\n"
-                f"🧬 *MD5:* `{zip_md5}`\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"📤 *Uploading:* `{os.path.basename(file_path)}` to Gofile..."
+                f"✅ *Build Completed*\n"
+                f"🕒 *Started:* *{start_time_esc}*\n\n"
+                f"📀 *Rom:* *{rom_name_esc}*\n"
+                f"📱 *Device:* *{device_esc}*\n"
+                f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
+                f"🛠️ *Actions:* *{actions_esc}*\n"
+                f"{config_block}\n\n"
+                f"📤 *Uploading:* `{item['name']}` to Gofile..."
             )
             broadcast_edit(processing_msg, current_status)
             
-            url = upload_to_gofile(file_path)
+            url = upload_to_gofile(item['path'])
             if url:
-                uploaded_urls[file_type] = url
+                item['link'] = url
                 
-        # Send final build notification card
-        links_lines = []
-        if "ROM" in uploaded_urls:
-            links_lines.append(f"📦 *ROM:* [Download]({uploaded_urls['ROM']})")
-        if "OTA_JSON" in uploaded_urls:
-            links_lines.append(f"📄 *OTA JSON:* [Download]({uploaded_urls['OTA_JSON']})")
-        if "BOOT_IMG" in uploaded_urls:
-            links_lines.append(f"🔌 *BOOT_IMG:* [Download]({uploaded_urls['BOOT_IMG']})")
-        if "DTBO_IMG" in uploaded_urls:
-            links_lines.append(f"🔌 *DTBO_IMG:* [Download]({uploaded_urls['DTBO_IMG']})")
-        if "VENDOR_BOOT" in uploaded_urls:
-            links_lines.append(f"🔌 *VENDOR_BOOT:* [Download]({uploaded_urls['VENDOR_BOOT']})")
-        if "RECOVERY_IMG" in uploaded_urls:
-            links_lines.append(f"🔌 *RECOVERY_IMG:* [Download]({uploaded_urls['RECOVERY_IMG']})")
-        if "SUPER_EMPTY" in uploaded_urls:
-            links_lines.append(f"🔌 *SUPER_EMPTY:* [Download]({uploaded_urls['SUPER_EMPTY']})")
+        # Build files lines for collapsible quote box
+        files_lines = []
+        for idx, item in enumerate(files_metadata, 1):
+            files_lines.append(f"{idx}. File: {item['name']}")
+            files_lines.append(f"     Type: {item['type']} | Size: {item['size']}")
+            files_lines.append(f"     MD5: {item['md5']}")
+            files_lines.append(f"     Link: {item['link']}")
+            if idx < len(files_metadata):
+                files_lines.append("") # empty line between files
+                
+        # Format as collapsible quote starting with **> and ending with ||
+        quoted_lines = ["**> Rom Files uploaded:"]
+        for line in files_lines:
+            quoted_lines.append(f"> {line}" if line else ">")
+        if len(quoted_lines) > 1:
+            quoted_lines[-1] = quoted_lines[-1] + "||"
+        else:
+            quoted_lines[0] = quoted_lines[0] + "||"
             
-        links_section = "\n".join(links_lines) if links_lines else "⚠️ *Upload Error:* Files failed to upload to Gofile."
+        files_quoted = "\n".join(quoted_lines)
         
         success_card = (
-            f"✅ *ROM Build Finished Successfully!* 🎉\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔧 *Device:* `{device}`\n"
-            f"⏱️ *Build Duration:* `{duration_str}`\n"
-            f"📦 *Output:* `{zname}` ({zsize:.2f} GB)\n"
-            f"🧬 *MD5:* `{zip_md5}`\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📥 *Gofile Upload Links:*\n"
-            f"{links_section}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━"
+            f"✅ *Build Completed*\n"
+            f"🕒 *Started:* *{start_time_esc}*\n\n"
+            f"📀 *Rom:* *{rom_name_esc}*\n"
+            f"📱 *Device:* *{device_esc}*\n"
+            f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
+            f"🛠️ *Actions:* *{actions_esc}*\n"
+            f"{config_block}\n\n"
+            f"{files_quoted}"
         )
         broadcast_edit(processing_msg, success_card)
+        broadcast_pin(processing_msg)
         
     else:
         # Failure logic
         failure_card = (
-            f"❌ *ROM Build Failed!* 😭\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔧 *Device:* `{ctx['device']}`\n"
-            f"⏱️ *Duration:* `{duration_str}`\n"
-            f"🛑 *Exit Code:* `{exit_code}`\n"
-            f"━━━━━━━━━━━━━━━━━━━━━"
+            f"❌ *Build Failed*\n"
+            f"🕒 *Started:* *{start_time_esc}*\n\n"
+            f"📀 *Rom:* *{rom_name_esc}*\n"
+            f"📱 *Device:* *{device_esc}*\n"
+            f"⏱️ *Elapsed:* *{duration_esc}*\n\n"
+            f"🛠️ *Actions:* *{actions_esc} (1 failed)*\n"
+            f"{config_block}\n\n"
+            f"📄 Check logs for details. Error log uploaded if available."
         )
         broadcast_message(failure_card)
         
@@ -727,7 +961,17 @@ class APIHandler(BaseHTTPRequestHandler):
         top_path = data.get("top")
         command = data.get("command", "m bacon")
         device = data.get("device", "Unknown")
+        if "_" in device:
+            device = device.split("_", 1)[1]
         targets = data.get("targets", "bacon")
+        variant = data.get("variant", "Unknown")
+        release = data.get("release", "Unknown")
+        
+        # Extract new environment variables
+        platform_version = data.get("platform_version", "Unknown")
+        target_product = data.get("target_product", "Unknown")
+        target_arch = data.get("target_arch", "Unknown")
+        build_id = data.get("build_id", "Unknown")
         
         if not top_path:
             self.send_response(400)
@@ -738,18 +982,49 @@ class APIHandler(BaseHTTPRequestHandler):
             
         print(f"[API] Build starting in workspace: {top_path}")
         
+        # Extract ROM name
+        rom_name = get_rom_name(top_path)
+        
+        # Fallbacks for variant / release
+        if not variant or variant == "Unknown":
+            v_det, r_det = get_build_vars(top_path)
+            variant = v_det
+            if not release or release == "Unknown":
+                release = r_det
+        elif not release or release == "Unknown":
+            _, r_det = get_build_vars(top_path)
+            release = r_det
+
         # Broadcast initial "Build Starting" message
-        start_time_str = time.strftime("%Y-%m-%d %H:%M:%S")
+        start_time_epoch = time.time()
+        start_time_str = get_formatted_start_time(start_time_epoch)
+        progress_bar = make_progress_bar(0.0, length=10)
         sys_stats = get_sys_info()
+        sys_info_quoted = make_quoted_block("🖥️ System info:", sys_stats)
+        rom_name_esc = escape_markdown(rom_name)
+        device_esc = escape_markdown(device)
+        start_time_esc = escape_markdown(start_time_str)
+        
+        ctx_temp = {
+            "variant": variant,
+            "release": release,
+            "platform_version": platform_version,
+            "target_product": target_product,
+            "target_arch": target_arch,
+            "build_id": build_id
+        }
+        config_block = format_configuration(ctx_temp)
         
         notify_text = (
-            f"🚀 *New ROM Build Initiated!*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔧 *Device:* `{device}`\n"
-            f"📂 *AOSP Path:* `{os.path.basename(top_path)}`\n"
-            f"📅 *Started:* `{start_time_str}`\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 *System Info:*\n```\n{sys_stats}\n```"
+            f"⚙️ *Build In Progress*\n"
+            f"🕒 *Started:* *{start_time_esc}*\n\n"
+            f"📀 *Rom:* *{rom_name_esc}*\n"
+            f"📱 *Device:* *{device_esc}*\n"
+            f"📈 *Progress:* *[{progress_bar}] 0.00%*\n"
+            f"🛠️ *Actions:* *0/0*\n"
+            f"⏱️ *Elapsed:* *0 seconds*\n\n"
+            f"{config_block}\n\n"
+            f"{sys_info_quoted}"
         )
         
         messages_map = broadcast_message(notify_text)
@@ -761,7 +1036,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 
             stop_flag = threading.Event()
             ACTIVE_BUILDS[top_path] = {
-                "start_time": time.time(),
+                "start_time": start_time_epoch,
                 "command": command,
                 "device": device,
                 "targets": targets,
@@ -770,7 +1045,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 "total": 0,
                 "action": "Starting environment build engine...",
                 "messages": messages_map,
-                "stop_flag": stop_flag
+                "stop_flag": stop_flag,
+                "rom_name": rom_name,
+                "variant": variant,
+                "release": release,
+                "platform_version": platform_version,
+                "target_product": target_product,
+                "target_arch": target_arch,
+                "build_id": build_id
             }
             print(f"[API] ACTIVE_BUILDS keys after start: {list(ACTIVE_BUILDS.keys())}")
             
