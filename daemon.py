@@ -22,7 +22,6 @@ def load_config():
         default_config = {
             "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
             "subscribed_chats": [],
-            "history": [],
             "port": DEFAULT_PORT
         }
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -35,7 +34,7 @@ def load_config():
             return json.load(f)
     except Exception as e:
         print(f"Error reading config: {e}", file=sys.stderr)
-        return {"bot_token": "YOUR_TELEGRAM_BOT_TOKEN", "subscribed_chats": [], "history": [], "port": DEFAULT_PORT}
+        return {"bot_token": "YOUR_TELEGRAM_BOT_TOKEN", "subscribed_chats": [], "port": DEFAULT_PORT}
 
 def save_config(config):
     try:
@@ -375,8 +374,7 @@ def handle_telegram_message(msg):
             f"• `/subscribe` - Add this chat/group to receive live build alerts.\n"
             f"• `/unsubscribe` - Remove this chat from receiving alerts.\n"
             f"• `/status` - Check current active build progress.\n"
-            f"• `/sysinfo` - View server CPU, RAM, and Disk storage.\n"
-            f"• `/history` - View the last 5 build results."
+            f"• `/sysinfo` - View server CPU, RAM, and Disk storage."
         )
         send_message(chat_id, welcome)
         
@@ -430,24 +428,6 @@ def handle_telegram_message(msg):
     elif text.startswith("/sysinfo"):
         sys_info = get_sys_info()
         send_message(chat_id, f"🖥️ *Build Server Stats:*\n━━━━━━━━━━━━━━━━━━━━━\n```\n{sys_info}\n```")
-        
-    elif text.startswith("/history"):
-        history = CONFIG.get("history", [])
-        if not history:
-            send_message(chat_id, "📭 No build history found.")
-            return
-            
-        text_lines = ["📁 *Recent Build History (Last 5):*", "━━━━━━━━━━━━━━━━━━━━━"]
-        # Last 5 builds
-        for b in reversed(history[-5:]):
-            icon = "✅" if b["status"] == "SUCCESS" else "❌"
-            dur = format_duration(b["duration"])
-            text_lines.append(
-                f"{icon} *{b['device']}* - `{b['command']}`\n"
-                f"⏱️ Duration: `{dur}` | Target: `{b['targets']}`\n"
-                f"📅 Finished: `{b['finished_at']}`\n"
-            )
-        send_message(chat_id, "\n".join(text_lines))
 
 # HTTP Server API Interface
 class APIHandler(BaseHTTPRequestHandler):
@@ -571,20 +551,6 @@ class APIHandler(BaseHTTPRequestHandler):
         
         # Determine status
         status = "SUCCESS" if exit_code == 0 else "FAILED"
-        
-        # Load config to append history
-        config = CONFIG
-        history_entry = {
-            "device": ctx["device"],
-            "command": ctx["command"],
-            "targets": ctx["targets"],
-            "duration": duration,
-            "status": status,
-            "exit_code": exit_code,
-            "finished_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        config["history"].append(history_entry)
-        save_config(config)
         
         # Delete the pinned live updates message so we don't clutter the chat
         for chat_id, msg_id in ctx["messages"].items():

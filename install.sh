@@ -24,7 +24,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
 {
     "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
     "subscribed_chats": [],
-    "history": [],
     "port": 8080
 }
 EOF

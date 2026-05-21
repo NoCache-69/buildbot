@@ -11,7 +11,6 @@ An elegant, zero-dependency background Telegram bot built in Python to track And
 - **💾 Auto-Discovered Outputs**: Displays output ZIP package details (filename and file size) upon a successful build.
 - **🔍 Error Snippet Capture**: If a build fails, the last 25 lines of the compiler output are automatically extracted, formatted, and delivered directly to Telegram.
 - **🖥️ System Health Metrics**: Check build server load (`/sysinfo`) to monitor CPU load, RAM usage, and available disk space.
-- **📁 Compilation History**: Access history for the last 5 ROM compilation tasks via `/history`.
 - **⚙️ Seamless Background Service**: Easily configured as a systemd user-level service (`tg-build-bot.service`), running persistently without root permissions.
 
 ---
@@ -22,7 +21,7 @@ An elegant, zero-dependency background Telegram bot built in Python to track And
 - **[cli.py](file:///home/nocache/bot/cli.py)**: Trigger CLI tool that wraps and communicates status events (`start`/`stop`) to the background daemon via local POST requests.
 - **[tg_hooks.sh](file:///home/nocache/bot/tg_hooks.sh)**: Shell aliases and wrappers for `m`, `mka`, and `make`. Captures compilation logs to `out/tg_build.log` and fires start/stop notifications.
 - **[install.sh](file:///home/nocache/bot/install.sh)**: Auto-installer script setting correct file permissions, initializing configuration structures, and generating the systemd user service unit.
-- **[config.json](file:///home/nocache/bot/config.json)**: User configuration containing the Telegram bot token, subscribed chat IDs, port details, and compiled build history.
+- **[config.json](file:///home/nocache/bot/config.json)**: User configuration containing the Telegram bot token, subscribed chat IDs, and port details.
 
 ---
 
@@ -41,7 +40,6 @@ Open your configuration file [config.json](file:///home/nocache/bot/config.json)
 {
     "bot_token": "8834515366:AAHjsHbdXWKDvgiJRhp53juv3WHu6iTtljc",
     "subscribed_chats": [],
-    "history": [],
     "port": 8080
 }
 ```
@@ -102,7 +100,6 @@ Send these commands directly to the bot inside your subscribed chats:
 | **`/unsubscribe`** | Stops sending build alerts to the current chat. |
 | **`/status`** | Displays details about any currently compiling ROMs (elapsed, ETA, compilation bar, compiler tasks). |
 | **`/sysinfo`** | Shows build server performance specs (CPU load, RAM consumption, and Free Disk space). |
-| **`/history`** | Lists the 5 most recent compilations, their durations, completion times, and status. |
 
 ---
 
