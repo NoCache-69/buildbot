@@ -139,54 +139,22 @@ def send_document(chat_id, file_path, caption=None):
         print(f"[Telegram] Error: File to upload does not exist: {file_path}", file=sys.stderr)
         return None
         
-    url = f"https://api.telegram.org/bot{token}/sendDocument"
-    boundary = "----TelegramFormBoundary" + str(time.time())
-    
-    parts = []
-    
-    # Field: chat_id
-    parts.append(b"--" + boundary.encode('utf-8') + b"\r\n")
-    parts.append(b'Content-Disposition: form-data; name="chat_id"\r\n\r\n')
-    parts.append(str(chat_id).encode('utf-8') + b"\r\n")
-    
-    # Field: caption (if provided)
+    cmd = [
+        "curl", "-s", "-X", "POST",
+        f"https://api.telegram.org/bot{token}/sendDocument",
+        "-F", f"chat_id={chat_id}",
+        "-F", f"document=@{file_path}"
+    ]
     if caption:
-        parts.append(b"--" + boundary.encode('utf-8') + b"\r\n")
-        parts.append(b'Content-Disposition: form-data; name="caption"\r\n\r\n')
-        parts.append(caption.encode('utf-8') + b"\r\n")
+        cmd += ["-F", f"caption={caption}"]
         
-    # Field: document
-    filename = os.path.basename(file_path)
-    parts.append(b"--" + boundary.encode('utf-8') + b"\r\n")
-    parts.append(f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'.encode('utf-8'))
-    parts.append(b'Content-Type: text/plain\r\n\r\n')
-    
-    try:
-        with open(file_path, 'rb') as f:
-            file_data = f.read()
-        parts.append(file_data + b"\r\n")
-    except Exception as e:
-        print(f"[Telegram] Error reading file for upload: {e}", file=sys.stderr)
-        return None
-        
-    # End boundary
-    parts.append(b"--" + boundary.encode('utf-8') + b"--\r\n")
-    
-    # Join everything into a single bytes payload
-    data = b"".join(parts)
-    
-    headers = {
-        "Content-Type": f"multipart/form-data; boundary={boundary}",
-        "Content-Length": str(len(data))
-    }
-    
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
-    except Exception as e:
-        print(f"[Telegram] sendDocument API call error: {e}", file=sys.stderr)
-        return None
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        try:
+            return json.loads(result.stdout)
+        except Exception:
+            return None
+    return None
 
 def broadcast_document(file_path, caption=None):
     chats = CONFIG.get("subscribed_chats", [])
@@ -704,20 +672,26 @@ def process_post_build(top_path, ctx, exit_code):
         )
         broadcast_message(failure_card)
         
-        # Generate out/error.log from out/tg_build.log if it doesn't already exist
+        # Generate out/error.log from out/tg_build.log (overwrite always)
         error_log_path = os.path.join(top_path, "out", "error.log")
-        if not os.path.exists(error_log_path):
-            try:
-                log_file_path = os.path.join(top_path, "out", "tg_build.log")
-                if os.path.exists(log_file_path):
-                    with open(log_file_path, 'r', errors='ignore') as f:
-                        lines = f.readlines()
-                    # Extract the last 1000 lines for a detailed compile trace
-                    last_lines = lines[-1000:]
-                    with open(error_log_path, 'w', errors='ignore') as f:
-                        f.writelines(last_lines)
-            except Exception as ex:
-                print(f"Error creating out/error.log: {ex}", file=sys.stderr)
+        try:
+            if os.path.exists(error_log_path):
+                os.remove(error_log_path)
+        except Exception:
+            pass
+            
+        try:
+            log_file_path = os.path.join(top_path, "out", "tg_build.log")
+            if os.path.exists(log_file_path):
+                with open(log_file_path, 'r', errors='ignore') as f:
+                    lines = f.readlines()
+                # Extract the last 1000 lines for a detailed compile trace
+                last_lines = lines[-1000:]
+                os.makedirs(os.path.dirname(error_log_path), exist_ok=True)
+                with open(error_log_path, 'w', errors='ignore') as f:
+                    f.writelines(last_lines)
+        except Exception as ex:
+            print(f"Error creating out/error.log: {ex}", file=sys.stderr)
         
         # Broadcast the error.log document to all subscribers
         if os.path.exists(error_log_path):
