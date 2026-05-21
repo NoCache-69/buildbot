@@ -975,28 +975,8 @@ def process_post_build(top_path, ctx, exit_code):
         )
         broadcast_message(failure_card, parse_mode="HTML")
         
-        # Generate out/error.log from out/tg_build.log (overwrite always)
+        # Broadcast the existing error.log document if it exists
         error_log_path = os.path.join(top_path, "out", "error.log")
-        try:
-            if os.path.exists(error_log_path):
-                os.remove(error_log_path)
-        except Exception:
-            pass
-            
-        try:
-            log_file_path = os.path.join(top_path, "out", "tg_build.log")
-            if os.path.exists(log_file_path):
-                with open(log_file_path, 'r', errors='ignore') as f:
-                    lines = f.readlines()
-                # Extract the last 1000 lines for a detailed compile trace
-                last_lines = lines[-1000:]
-                os.makedirs(os.path.dirname(error_log_path), exist_ok=True)
-                with open(error_log_path, 'w', errors='ignore') as f:
-                    f.writelines(last_lines)
-        except Exception as ex:
-            print(f"Error creating out/error.log: {ex}", file=sys.stderr)
-        
-        # Broadcast the error.log document to all subscribers
         if os.path.exists(error_log_path):
             broadcast_document(error_log_path, caption=f"🔍 Error log trace for device `{ctx['device']}`")
 
