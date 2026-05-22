@@ -163,7 +163,3 @@ _tg_make_wrapper() {
 alias m='_tg_m_wrapper'
 alias mka='_tg_mka_wrapper'
 alias make='_tg_make_wrapper'
-
-# Print a nice status on loading
-echo "🚀 [Telegram Bot] Shell aliases loaded successfully! ('m', 'mka', 'make')"
-echo "💡 Commands will automatically broadcast live progress to your Telegram channels."
