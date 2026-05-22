@@ -632,7 +632,8 @@ def handle_telegram_message(msg):
             f"• `/subscribe` - Add this chat/group to receive live build alerts.\n"
             f"• `/unsubscribe` - Remove this chat from receiving alerts.\n"
             f"• `/status` - Check current active build progress.\n"
-            f"• `/sysinfo` - View server CPU, RAM, and Disk storage."
+            f"• `/sysinfo` - View server CPU, RAM, and Disk storage.\n"
+            f"• `/ping` - Check if the bot is alive and active."
         )
         send_message(chat_id, welcome)
         
@@ -690,6 +691,15 @@ def handle_telegram_message(msg):
     elif text.startswith("/sysinfo"):
         sys_info = get_sys_info()
         send_message(chat_id, f"🖥️ *Build Server Stats:*\n━━━━━━━━━━━━━━━━━━━━━\n```\n{sys_info}\n```")
+        
+    elif text.startswith("/ping"):
+        sent_date = msg.get("date")
+        if sent_date:
+            elapsed = time.time() - sent_date
+            resp_str = f" *{int(elapsed * 1000)}ms*"
+        else:
+            resp_str = ""
+        send_message(chat_id, f"🏓 *Pong!*{resp_str}")
 
 def process_post_build(top_path, ctx, exit_code):
     time.sleep(1.5)
