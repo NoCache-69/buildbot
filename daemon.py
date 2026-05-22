@@ -48,40 +48,62 @@ def upload_to_gofile(file_path):
     if not os.path.exists(file_path):
         print(f"[Gofile] Error: file not found: {file_path}", file=sys.stderr)
         return None
+        
+    # Get server list
+    servers = []
     try:
-        # Get server list
         url = "https://api.gofile.io/servers"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=15) as response:
             res_data = json.loads(response.read().decode('utf-8'))
-        
         if res_data.get("status") == "ok":
-            servers = res_data.get("data", {}).get("servers", [])
-            if servers:
-                # Use the last server in the list as in the bash script
-                server = servers[-1]["name"]
-            else:
-                server = "store1" # fallback
-        else:
-            server = "store1"
-            
-        print(f"[Gofile] Selected server node: {server}")
-        
-        # Run curl in subprocess to avoid huge memory usage on python
-        cmd = ["curl", "-s", "-X", "POST", f"https://{server}.gofile.io/contents/uploadfile", "-F", f"file=@{file_path}"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            resp = json.loads(result.stdout)
-            if resp.get("status") == "ok":
-                link = resp.get("data", {}).get("downloadPage")
-                print(f"[Gofile] Uploaded {file_path} successfully: {link}")
-                return link
-            else:
-                print(f"[Gofile] Upload API error for {file_path}: {resp}", file=sys.stderr)
-        else:
-            print(f"[Gofile] Curl failed for {file_path} with code {result.returncode}: {result.stderr}", file=sys.stderr)
+            servers = [s["name"] for s in res_data.get("data", {}).get("servers", []) if s.get("name")]
     except Exception as e:
-        print(f"[Gofile] Exception uploading {file_path}: {e}", file=sys.stderr)
+        print(f"[Gofile] Failed to get server list: {e}", file=sys.stderr)
+        
+    if not servers:
+        servers = ["store1", "store5", "store8"]  # Fallbacks
+        
+    # Order servers so that the last one is tried first (to preserve original design behavior as first choice)
+    ordered_servers = []
+    if servers:
+        last_srv = servers[-1]
+        ordered_servers.append(last_srv)
+        for s in servers[:-1]:
+            if s != last_srv:
+                ordered_servers.append(s)
+    else:
+        ordered_servers = ["store1"]
+
+    max_attempts = min(3, len(ordered_servers))
+    
+    for attempt in range(max_attempts):
+        server = ordered_servers[attempt]
+        print(f"[Gofile] Upload attempt {attempt + 1}/{max_attempts} using server: {server}")
+        try:
+            # Run curl in subprocess to avoid huge memory usage on python
+            cmd = ["curl", "-s", "-X", "POST", f"https://{server}.gofile.io/contents/uploadfile", "-F", f"file=@{file_path}"]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                try:
+                    resp = json.loads(result.stdout)
+                    if resp.get("status") == "ok":
+                        link = resp.get("data", {}).get("downloadPage")
+                        print(f"[Gofile] Uploaded {file_path} successfully: {link}")
+                        return link
+                    else:
+                        print(f"[Gofile] Upload API error for {file_path} on {server}: {resp}", file=sys.stderr)
+                except Exception as parse_err:
+                    print(f"[Gofile] Response parse error on {server} (raw output: {result.stdout.strip()}): {parse_err}", file=sys.stderr)
+            else:
+                print(f"[Gofile] Curl failed for {file_path} on {server} with code {result.returncode}: {result.stderr}", file=sys.stderr)
+        except Exception as e:
+            print(f"[Gofile] Exception uploading {file_path} on {server}: {e}", file=sys.stderr)
+            
+        if attempt < max_attempts - 1:
+            print(f"[Gofile] Retrying with a different server...", file=sys.stderr)
+            time.sleep(2)
+        
     return None
 
 # Global variables
