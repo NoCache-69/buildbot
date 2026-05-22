@@ -484,7 +484,7 @@ def track_build_log(top_path):
         
     print(f"[Tracker] Log file found. Tailing: {logfile}")
     
-    regex = re.compile(r'\[\s*(\d+)%\s+(\d+)/(\d+)\]\s*(.*)')
+    regex = re.compile(r'\[\s*(?:(\d+)%\s+)?(\d+)/(\d+)(?:\s+[^\]]*)?\]\s*(.*)')
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     
     last_update = 0
@@ -514,10 +514,18 @@ def track_build_log(top_path):
             clean_line = ansi_escape.sub('', line).strip()
             match = regex.match(clean_line)
             if match:
-                percentage = int(match.group(1))
+                pct_val = match.group(1)
                 completed = int(match.group(2))
                 total = int(match.group(3))
                 action = match.group(4)
+                
+                if pct_val is not None:
+                    percentage = int(pct_val)
+                else:
+                    percentage = int((completed / total) * 100) if total > 0 else 0
+                
+                # Ensure percentage is between 0 and 100
+                percentage = min(100, max(0, percentage))
                 
                 with ACTIVE_BUILDS_LOCK:
                     if top_path in ACTIVE_BUILDS:
