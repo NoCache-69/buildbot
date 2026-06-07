@@ -1,6 +1,33 @@
 # AOSP Build Tracking Shell Hooks
 # Add "source /home/nocache/bot/tg_hooks.sh" to your ~/.bashrc or ~/.zshrc
 
+_tg_print_build_status() {
+    local exit_code=$1
+    local start_time=$2
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
+    
+    local hours=$((elapsed / 3600))
+    local minutes=$(((elapsed % 3600) / 60))
+    local seconds=$((elapsed % 60))
+    local elapsed_str=""
+    if [ $hours -gt 0 ]; then
+        elapsed_str="${hours}h ${minutes}m ${seconds}s"
+    elif [ $minutes -gt 0 ]; then
+        elapsed_str="${minutes}m ${seconds}s"
+    else
+        elapsed_str="${seconds}s"
+    fi
+    
+    if [ $exit_code -eq 0 ]; then
+        printf "\n✅ \033[1;32mBuild Completed Successfully!\033[0m\n"
+        printf "⏱️ \033[1mElapsed Time:\033[0m %s\n\n" "$elapsed_str"
+    else
+        printf "\n❌ \033[1;31mBuild Failed!\033[0m\n"
+        printf "⏱️ \033[1mElapsed Time:\033[0m %s\n\n" "$elapsed_str"
+    fi
+}
+
 _tg_m_wrapper() {
     # 1. Determine build workspace root
     local TOP=""
@@ -42,6 +69,7 @@ _tg_m_wrapper() {
     python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
         --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
+    local start_time=$(date +%s)
     # 6. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
         script -q -e -c "$TOP/build/soong/soong_ui.bash --make-mode $*" "$logfile"
@@ -52,6 +80,8 @@ _tg_m_wrapper() {
     
     # 7. Notify daemon about stopping
     python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
+    
+    _tg_print_build_status "$exit_code" "$start_time"
     
     return $exit_code
 }
@@ -97,6 +127,7 @@ _tg_mka_wrapper() {
         jobs=${NINJA_REMOTE_NUM_JOBS:-2000}
     fi
     
+    local start_time=$(date +%s)
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
         script -q -e -c "$TOP/build/soong/soong_ui.bash --make-mode -j$jobs $*" "$logfile"
@@ -106,6 +137,8 @@ _tg_mka_wrapper() {
     local exit_code=$?
     
     python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
+    
+    _tg_print_build_status "$exit_code" "$start_time"
     
     return $exit_code
 }
@@ -146,6 +179,7 @@ _tg_make_wrapper() {
     python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
         --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
+    local start_time=$(date +%s)
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)
     if [ -f "$TOP/build/soong/soong_ui.bash" ]; then
         script -q -e -c "$TOP/build/soong/soong_ui.bash --make-mode $*" "$logfile"
@@ -155,6 +189,8 @@ _tg_make_wrapper() {
     local exit_code=$?
     
     python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
+    
+    _tg_print_build_status "$exit_code" "$start_time"
     
     return $exit_code
 }
