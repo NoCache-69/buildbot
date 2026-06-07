@@ -2,7 +2,7 @@
 # Installation script for AOSP Build Tracking Bot
 set -e
 
-BOT_DIR="/home/nocache/bot"
+BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$BOT_DIR/config.json"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SYSTEMD_USER_DIR/tg-build-bot.service"

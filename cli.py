@@ -6,7 +6,8 @@ import argparse
 import urllib.request
 import urllib.error
 
-CONFIG_PATH = "/home/nocache/bot/config.json"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 DEFAULT_PORT = 8080
 
 def get_daemon_port():

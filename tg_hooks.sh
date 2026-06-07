@@ -1,5 +1,14 @@
 # AOSP Build Tracking Shell Hooks
-# Add "source /home/nocache/bot/tg_hooks.sh" to your ~/.bashrc or ~/.zshrc
+# Add "source /path/to/tg_hooks.sh" to your ~/.bashrc or ~/.zshrc
+
+# Determine directory of this script, supporting both bash and zsh
+if [ -n "$BASH_VERSION" ]; then
+    _TG_BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+elif [ -n "$ZSH_VERSION" ]; then
+    _TG_BOT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
+else
+    _TG_BOT_DIR="/home/nocache/bot" # fallback
+fi
 
 _tg_print_build_status() {
     local exit_code=$1
@@ -66,7 +75,7 @@ _tg_m_wrapper() {
     rm -f "$logfile"
     
     # 5. Notify daemon about starting
-    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
+    python3 "$_TG_BOT_DIR/cli.py" start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
         --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
     local start_time=$(date +%s)
@@ -79,7 +88,7 @@ _tg_m_wrapper() {
     local exit_code=$?
     
     # 7. Notify daemon about stopping
-    python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
+    python3 "$_TG_BOT_DIR/cli.py" stop --top "$TOP" --exit-code "$exit_code"
     
     _tg_print_build_status "$exit_code" "$start_time"
     
@@ -119,7 +128,7 @@ _tg_mka_wrapper() {
     local logfile="$TOP/out/tg_build.log"
     rm -f "$logfile"
     
-    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
+    python3 "$_TG_BOT_DIR/cli.py" start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
         --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
     local jobs=$(nproc)
@@ -136,7 +145,7 @@ _tg_mka_wrapper() {
     fi
     local exit_code=$?
     
-    python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
+    python3 "$_TG_BOT_DIR/cli.py" stop --top "$TOP" --exit-code "$exit_code"
     
     _tg_print_build_status "$exit_code" "$start_time"
     
@@ -176,7 +185,7 @@ _tg_make_wrapper() {
     local logfile="$TOP/out/tg_build.log"
     rm -f "$logfile"
     
-    python3 /home/nocache/bot/cli.py start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
+    python3 "$_TG_BOT_DIR/cli.py" start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
         --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
     
     local start_time=$(date +%s)
@@ -188,7 +197,7 @@ _tg_make_wrapper() {
     fi
     local exit_code=$?
     
-    python3 /home/nocache/bot/cli.py stop --top "$TOP" --exit-code "$exit_code"
+    python3 "$_TG_BOT_DIR/cli.py" stop --top "$TOP" --exit-code "$exit_code"
     
     _tg_print_build_status "$exit_code" "$start_time"
     
