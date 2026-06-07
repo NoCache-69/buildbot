@@ -38,6 +38,7 @@ _tg_print_build_status() {
 }
 
 _tg_m_wrapper() {
+    local -x _TG_IN_WRAPPER=1
     # 1. Determine build workspace root
     local TOP=""
     if declare -f gettop > /dev/null; then
@@ -96,6 +97,7 @@ _tg_m_wrapper() {
 }
 
 _tg_mka_wrapper() {
+    local -x _TG_IN_WRAPPER=1
     local TOP=""
     if declare -f gettop > /dev/null; then
         TOP=$(gettop)
@@ -153,6 +155,7 @@ _tg_mka_wrapper() {
 }
 
 _tg_make_wrapper() {
+    local -x _TG_IN_WRAPPER=1
     local TOP=""
     if declare -f gettop > /dev/null; then
         TOP=$(gettop)
@@ -204,7 +207,37 @@ _tg_make_wrapper() {
     return $exit_code
 }
 
-# Apply Shell Aliases
+# Export the wrapper functions so they are available in subshells
+if [ -n "$BASH_VERSION" ]; then
+    export -f _tg_print_build_status
+    export -f _tg_m_wrapper
+    export -f _tg_mka_wrapper
+    export -f _tg_make_wrapper
+fi
+
+# Define fallback functions for non-interactive scripts
+m() {
+    _tg_m_wrapper "$@"
+}
+mka() {
+    _tg_mka_wrapper "$@"
+}
+make() {
+    if [ "$_TG_IN_WRAPPER" = "1" ]; then
+        command make "$@"
+    else
+        _tg_make_wrapper "$@"
+    fi
+}
+
+# Export fallback functions for scripts
+if [ -n "$BASH_VERSION" ]; then
+    export -f m
+    export -f mka
+    export -f make
+fi
+
+# Apply Shell Aliases (taking precedence over functions in interactive shells)
 alias m='_tg_m_wrapper'
 alias mka='_tg_mka_wrapper'
 alias make='_tg_make_wrapper'
