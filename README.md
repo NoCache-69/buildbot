@@ -8,6 +8,7 @@ An elegant, zero-dependency background Telegram bot built in Python to track And
 
 - **🎯 Zero-Intervention Shell Hooking**: Simply type `m bacon`, `mka`, or `make` in your Android source root; the bot intercepts and tracks the build completely in the background.
 - **📊 Real-Time Progress Cards**: Updates subscribers in real-time with an elegant progress card detailing compile percentage, an ASCII visual progress bar, active compiler actions, and custom projected ETA.
+- **👤 Multi-User & Multi-Server Attribution**: Tracks and displays the system username and server hostname (e.g., `Builder: dev`, `Host: build-srv-1`) on all progress cards, status checks, and completion alerts. This makes it perfect for teams sharing a single Telegram channel across different servers.
 - **💾 Auto-Discovered Outputs**: Displays output ZIP package details (filename and file size) upon a successful build.
 - **🔍 Error Snippet Capture**: If a build fails, the last 25 lines of the compiler output are automatically extracted, formatted, and delivered directly to Telegram.
 - **🖥️ System Health Metrics**: Check build server load (`/sysinfo`) to monitor CPU load, RAM usage, and available disk space.
@@ -21,7 +22,7 @@ An elegant, zero-dependency background Telegram bot built in Python to track And
 - **[cli.py](file:///home/nocache/bot/cli.py)**: Trigger CLI tool that wraps and communicates status events (`start`/`stop`) to the background daemon via local POST requests.
 - **[tg_hooks.sh](file:///home/nocache/bot/tg_hooks.sh)**: Shell aliases and wrappers for `m`, `mka`, and `make`. Captures compilation logs to `out/tg_build.log` and fires start/stop notifications.
 - **[install.sh](file:///home/nocache/bot/install.sh)**: Auto-installer script setting correct file permissions, initializing configuration structures, and generating the systemd user service unit.
-- **[config.json](file:///home/nocache/bot/config.json)**: User configuration containing the Telegram bot token, subscribed chat IDs, and port details.
+- **config.json**: User configuration containing the Telegram bot token, subscribed chat IDs, and port details. It is loaded dynamically from `~/.config/tg_build_bot/config.json` to avoid source control leakage and allow multi-user environments, but can be customized with the `TG_BOT_CONFIG` environment variable.
 
 ---
 
@@ -35,7 +36,7 @@ Follow these simple steps to configure and start your background build tracking 
 3. Copy the HTTP API token generated for you (e.g., `8834515366:AAHjs...`).
 
 ### 2️⃣ Configure Bot Settings
-Open your configuration file [config.json](file:///home/nocache/bot/config.json) and replace `"YOUR_TELEGRAM_BOT_TOKEN"` with your actual Telegram bot token:
+Open your configuration file at `~/.config/tg_build_bot/config.json` (created automatically by `install.sh`) and replace `"YOUR_TELEGRAM_BOT_TOKEN"` with your actual Telegram bot token:
 ```json
 {
     "bot_token": "8834515366:AAHjsHbdXWKDvgiJRhp53juv3WHu6iTtljc",
@@ -43,6 +44,12 @@ Open your configuration file [config.json](file:///home/nocache/bot/config.json)
     "port": 8080
 }
 ```
+
+> 💡 **Custom Settings Override**:
+> You can override the configuration location by exporting the `TG_BOT_CONFIG` environment variable. This is highly useful for running multiple individual bots on different ports/servers:
+> ```bash
+> export TG_BOT_CONFIG="$HOME/.config/tg_build_bot/custom_config.json"
+> ```
 
 ### 3️⃣ Run the Installer
 Generate the systemd service file and configure file permissions by executing:
