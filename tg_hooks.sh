@@ -7,7 +7,8 @@ if [ -n "$BASH_VERSION" ]; then
 elif [ -n "$ZSH_VERSION" ]; then
     _TG_BOT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
 else
-    _TG_BOT_DIR="/home/nocache/bot" # fallback
+    _TG_BOT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+    [ -z "$_TG_BOT_DIR" ] && _TG_BOT_DIR="$HOME/bot" # fallback
 fi
 
 _tg_print_build_status() {
@@ -76,8 +77,11 @@ _tg_m_wrapper() {
     rm -f "$logfile"
     
     # 5. Notify daemon about starting
+    local builder_user="${USER:-$(whoami 2>/dev/null || echo "Unknown")}"
+    local builder_host="${HOSTNAME:-$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "Unknown")}"
     python3 "$_TG_BOT_DIR/cli.py" start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
-        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
+        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id" \
+        --user "$builder_user" --host "$builder_host"
     
     local start_time=$(date +%s)
     # 6. Execute build inside a PTY using script to preserve TTY (enabling RBE)
@@ -130,8 +134,11 @@ _tg_mka_wrapper() {
     local logfile="$TOP/out/tg_build.log"
     rm -f "$logfile"
     
+    local builder_user="${USER:-$(whoami 2>/dev/null || echo "Unknown")}"
+    local builder_host="${HOSTNAME:-$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "Unknown")}"
     python3 "$_TG_BOT_DIR/cli.py" start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
-        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
+        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id" \
+        --user "$builder_user" --host "$builder_host"
     
     local jobs=$(nproc)
     if [ "$USE_RBE" = "1" ]; then
@@ -188,8 +195,11 @@ _tg_make_wrapper() {
     local logfile="$TOP/out/tg_build.log"
     rm -f "$logfile"
     
+    local builder_user="${USER:-$(whoami 2>/dev/null || echo "Unknown")}"
+    local builder_host="${HOSTNAME:-$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "Unknown")}"
     python3 "$_TG_BOT_DIR/cli.py" start --top "$TOP" --command "$cmd" --device "$device" --targets "$*" --variant "$variant" --release "$release" \
-        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id"
+        --platform-version "$platform_ver" --target-product "$target_prod" --target-arch "$target_arch" --build-id "$build_id" \
+        --user "$builder_user" --host "$builder_host"
     
     local start_time=$(date +%s)
     # 5. Execute build inside a PTY using script to preserve TTY (enabling RBE)

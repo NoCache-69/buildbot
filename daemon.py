@@ -15,8 +15,17 @@ import shutil
 import subprocess
 
 # Configuration path
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
+def get_config_path():
+    env_path = os.environ.get("TG_BOT_CONFIG")
+    if env_path:
+        return env_path
+    user_path = os.path.expanduser("~/.config/tg_build_bot/config.json")
+    if os.path.exists(user_path):
+        return user_path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "config.json")
+
+CONFIG_PATH = get_config_path()
 DEFAULT_PORT = 8080
 
 def load_config():
@@ -221,6 +230,12 @@ def escape_html(text):
 
 def format_configuration(ctx):
     lines = ["🔧 *Configuration:*"]
+    user = ctx.get("user")
+    host = ctx.get("host")
+    if user and user != "Unknown":
+        lines.append(f"  👤 *Builder:* *{escape_markdown(user)}*")
+    if host and host != "Unknown":
+        lines.append(f"  🖥️ *Host:* *{escape_markdown(host)}*")
     variant = ctx.get("variant", "Unknown")
     release = ctx.get("release", "Unknown")
     if variant and variant != "Unknown":
@@ -234,6 +249,12 @@ def format_configuration(ctx):
 
 def format_configuration_html(ctx):
     lines = ["🔧 <b>Configuration:</b>"]
+    user = ctx.get("user")
+    host = ctx.get("host")
+    if user and user != "Unknown":
+        lines.append(f"  👤 <b>Builder:</b> <b>{escape_html(user)}</b>")
+    if host and host != "Unknown":
+        lines.append(f"  🖥️ <b>Host:</b> <b>{escape_html(host)}</b>")
     variant = ctx.get("variant", "Unknown")
     release = ctx.get("release", "Unknown")
     if variant and variant != "Unknown":
@@ -675,10 +696,14 @@ def handle_telegram_message(msg):
             device_esc = escape_markdown(ctx['device'])
             elapsed_esc = escape_markdown(elapsed_str)
             tasks_esc = escape_markdown(f"{ctx['completed']:,} / {ctx['total']:,}")
+            user_esc = escape_markdown(ctx.get("user", "Unknown"))
+            host_esc = escape_markdown(ctx.get("host", "Unknown"))
             
             status_text += (
                 f"📱 *Active Build Details:*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 *Builder:* *{user_esc}*\n"
+                f"🖥️ *Host:* *{host_esc}*\n"
                 f"📱 *Device:* *{device_esc}*\n"
                 f"⏱️ *Elapsed:* *{elapsed_esc}*\n"
                 f"📈 *Progress:* `[{progress_bar}]` *{percentage}%*\n"
@@ -1022,6 +1047,8 @@ class APIHandler(BaseHTTPRequestHandler):
         target_product = data.get("target_product", "Unknown")
         target_arch = data.get("target_arch", "Unknown")
         build_id = data.get("build_id", "Unknown")
+        user = data.get("user", "Unknown")
+        host = data.get("host", "Unknown")
         
         if not top_path:
             self.send_response(400)
@@ -1061,7 +1088,9 @@ class APIHandler(BaseHTTPRequestHandler):
             "platform_version": platform_version,
             "target_product": target_product,
             "target_arch": target_arch,
-            "build_id": build_id
+            "build_id": build_id,
+            "user": user,
+            "host": host
         }
         config_block = format_configuration_html(ctx_temp)
         
@@ -1102,7 +1131,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 "platform_version": platform_version,
                 "target_product": target_product,
                 "target_arch": target_arch,
-                "build_id": build_id
+                "build_id": build_id,
+                "user": user,
+                "host": host
             }
             print(f"[API] ACTIVE_BUILDS keys after start: {list(ACTIVE_BUILDS.keys())}")
             

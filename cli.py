@@ -6,8 +6,17 @@ import argparse
 import urllib.request
 import urllib.error
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
+def get_config_path():
+    env_path = os.environ.get("TG_BOT_CONFIG")
+    if env_path:
+        return env_path
+    user_path = os.path.expanduser("~/.config/tg_build_bot/config.json")
+    if os.path.exists(user_path):
+        return user_path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "config.json")
+
+CONFIG_PATH = get_config_path()
 DEFAULT_PORT = 8080
 
 def get_daemon_port():
@@ -59,6 +68,8 @@ def main():
     parser_start.add_argument("--target-product", default="Unknown", help="Target Product")
     parser_start.add_argument("--target-arch", default="Unknown", help="Target Arch")
     parser_start.add_argument("--build-id", default="Unknown", help="Build ID")
+    parser_start.add_argument("--user", default="Unknown", help="Username of the builder")
+    parser_start.add_argument("--host", default="Unknown", help="Hostname of the build server")
 
     # Stop command parser
     parser_stop = subparsers.add_parser("stop", help="Trigger build stop tracking")
@@ -78,7 +89,9 @@ def main():
             "platform_version": args.platform_version,
             "target_product": args.target_product,
             "target_arch": args.target_arch,
-            "build_id": args.build_id
+            "build_id": args.build_id,
+            "user": args.user,
+            "host": args.host
         }
         success = send_request("start", data)
         sys.exit(0 if success else 1)
