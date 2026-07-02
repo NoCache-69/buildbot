@@ -230,12 +230,6 @@ def escape_html(text):
 
 def format_configuration(ctx):
     lines = ["🔧 *Configuration:*"]
-    user = ctx.get("user")
-    host = ctx.get("host")
-    if user and user != "Unknown":
-        lines.append(f"  👤 *Builder:* *{escape_markdown(user)}*")
-    if host and host != "Unknown":
-        lines.append(f"  🖥️ *Host:* *{escape_markdown(host)}*")
     variant = ctx.get("variant", "Unknown")
     release = ctx.get("release", "Unknown")
     if variant and variant != "Unknown":
@@ -249,12 +243,6 @@ def format_configuration(ctx):
 
 def format_configuration_html(ctx):
     lines = ["🔧 <b>Configuration:</b>"]
-    user = ctx.get("user")
-    host = ctx.get("host")
-    if user and user != "Unknown":
-        lines.append(f"  👤 <b>Builder:</b> <b>{escape_html(user)}</b>")
-    if host and host != "Unknown":
-        lines.append(f"  🖥️ <b>Host:</b> <b>{escape_html(host)}</b>")
     variant = ctx.get("variant", "Unknown")
     release = ctx.get("release", "Unknown")
     if variant and variant != "Unknown":
@@ -696,14 +684,10 @@ def handle_telegram_message(msg):
             device_esc = escape_markdown(ctx['device'])
             elapsed_esc = escape_markdown(elapsed_str)
             tasks_esc = escape_markdown(f"{ctx['completed']:,} / {ctx['total']:,}")
-            user_esc = escape_markdown(ctx.get("user", "Unknown"))
-            host_esc = escape_markdown(ctx.get("host", "Unknown"))
             
             status_text += (
                 f"📱 *Active Build Details:*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"👤 *Builder:* *{user_esc}*\n"
-                f"🖥️ *Host:* *{host_esc}*\n"
                 f"📱 *Device:* *{device_esc}*\n"
                 f"⏱️ *Elapsed:* *{elapsed_esc}*\n"
                 f"📈 *Progress:* `[{progress_bar}]` *{percentage}%*\n"
