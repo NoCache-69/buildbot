@@ -49,14 +49,15 @@ mkdir -p "$SYSTEMD_USER_DIR"
 cat <<EOF > "$SERVICE_FILE"
 [Unit]
 Description=AOSP Build Tracking Telegram Bot
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=$BOT_DIR
 ExecStart=/usr/bin/python3 $BOT_DIR/daemon.py
 Restart=always
-RestartSec=5
+RestartSec=10
 
 [Install]
 WantedBy=default.target
@@ -64,6 +65,19 @@ EOF
 
 echo "🔄 Reloading systemd user daemon..."
 systemctl --user daemon-reload || echo "⚠️ Warning: systemctl not available or failed. You can launch manually."
+
+# Enable user lingering so the service starts at system boot, not just on login
+if command -v loginctl >/dev/null 2>&1; then
+    loginctl enable-linger "$USER" && echo "✅ User lingering enabled — bot will start at boot." || echo "⚠️ Could not enable lingering. Bot may only start after login."
+else
+    echo "⚠️ loginctl not found. Bot may only start after you log in."
+fi
+
+# Enable and start the service now
+echo "🚀 Enabling and starting tg-build-bot.service..."
+systemctl --user enable tg-build-bot.service
+systemctl --user start tg-build-bot.service
+systemctl --user status tg-build-bot.service --no-pager || true
 
 # 4. Create manual start script as fallback
 echo "💾 Creating manual startup script (start_bot.sh)..."
@@ -86,14 +100,12 @@ echo "--------------------------------------------------"
 echo "1️⃣  Configure your Telegram Bot Token:"
 echo "    Open '$USER_CONFIG_FILE' and replace 'YOUR_TELEGRAM_BOT_TOKEN' with your token from @BotFather."
 echo ""
-echo "2️⃣  Start the background Bot Daemon:"
-echo "    Option A (Recommended - systemd):"
-echo "      systemctl --user enable tg-build-bot.service"
-echo "      systemctl --user start tg-build-bot.service"
+echo "2️⃣  The bot is already running! Manage it with:"
 echo "      systemctl --user status tg-build-bot.service"
-echo ""
-echo "    Option B (Fallback - background script):"
-echo "      $BOT_DIR/start_bot.sh"
+echo "      systemctl --user restart tg-build-bot.service"
+echo "      systemctl --user stop tg-build-bot.service"
+echo "    Or use the kill script:"
+echo "      $BOT_DIR/kill.sh"
 echo ""
 echo "3️⃣  Activate your Telegram Chat/Channel:"
 echo "    Add your bot to your groups/channels or start a private chat."
