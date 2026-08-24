@@ -6,11 +6,11 @@ import time
 import re
 import threading
 import socket
-import glob
+import http.client
 import urllib.request
 import urllib.error
-import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
 
@@ -121,30 +121,91 @@ CONFIG = load_config()
 ACTIVE_BUILDS = {}  # key: top_path, value: build_context dict
 ACTIVE_BUILDS_LOCK = threading.Lock()
 
-def telegram_api_call(method, params=None):
+# --- Persistent connection pool for Telegram API ---
+# Avoids TCP+TLS handshake per API call and supports concurrent access via
+# a small connection pool (up to 4 idle connections reused across threads).
+_TG_POOL = []
+_TG_POOL_LOCK = threading.Lock()
+_TG_POOL_MAX = 4
+
+def _tg_get_connection(timeout):
+    with _TG_POOL_LOCK:
+        if _TG_POOL:
+            return _TG_POOL.pop()
+    return http.client.HTTPSConnection("api.telegram.org", timeout=timeout)
+
+def _tg_release_connection(conn):
+    with _TG_POOL_LOCK:
+        if len(_TG_POOL) < _TG_POOL_MAX:
+            _TG_POOL.append(conn)
+        else:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+def _tg_discard_connection(conn):
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+def telegram_api_call(method, params=None, timeout=30):
     token = CONFIG.get("bot_token", "YOUR_TELEGRAM_BOT_TOKEN")
     if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
         print("[Telegram] WARNING: Bot token is not configured in config.json", file=sys.stderr)
         return None
-    
-    url = f"https://api.telegram.org/bot{token}/{method}"
+
+    path = f"/bot{token}/{method}"
     headers = {"Content-Type": "application/json"}
     data = json.dumps(params).encode('utf-8') if params else None
-    
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
+
+    for attempt in range(2):
+        conn = _tg_get_connection(timeout)
         try:
-            err_body = e.read().decode('utf-8')
-            print(f"[Telegram] API call HTTP error '{method}': {e.code} {e.reason} - {err_body}", file=sys.stderr)
-        except Exception:
-            print(f"[Telegram] API call HTTP error '{method}': {e.code} {e.reason}", file=sys.stderr)
+            conn.request("POST" if data else "GET", path, body=data, headers=headers)
+            response = conn.getresponse()
+            status = response.status
+            body = response.read().decode('utf-8')
+        except socket.timeout:
+            _tg_discard_connection(conn)
+            if method == "getUpdates":
+                # Long-poll read timeouts are expected and harmless.
+                return None
+            continue
+        except (http.client.HTTPException, OSError) as e:
+            _tg_discard_connection(conn)
+            if attempt == 0:
+                continue
+            print(f"[Telegram] API call error '{method}': {e}", file=sys.stderr)
+            return None
+        except Exception as e:
+            _tg_discard_connection(conn)
+            print(f"[Telegram] API call error '{method}': {e}", file=sys.stderr)
+            return None
+
+        if status == 200:
+            _tg_release_connection(conn)
+            try:
+                return json.loads(body)
+            except Exception as e:
+                print(f"[Telegram] API call parse error '{method}': {e}", file=sys.stderr)
+                return None
+        if status == 429:
+            _tg_release_connection(conn)
+            try:
+                retry_after = int(json.loads(body).get("parameters", {}).get("retry_after", 2))
+            except Exception:
+                retry_after = 2
+            print(f"[Telegram] Rate limited on '{method}', retrying in {retry_after}s", file=sys.stderr)
+            time.sleep(retry_after)
+            continue
+        _tg_release_connection(conn)
+        print(f"[Telegram] API call HTTP error '{method}': {status} - {body}", file=sys.stderr)
         return None
-    except Exception as e:
-        print(f"[Telegram] API call error '{method}': {e}", file=sys.stderr)
-        return None
+
+    print(f"[Telegram] API call error '{method}': connection failed after retries", file=sys.stderr)
+    return None
 
 def send_message(chat_id, text, parse_mode="Markdown"):
     params = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
@@ -160,12 +221,20 @@ def delete_message(chat_id, message_id):
 
 def broadcast_message(text, parse_mode="Markdown"):
     chats = CONFIG.get("subscribed_chats", [])
+    if not chats:
+        return {}
     sent_messages = {}
-    for chat_id in chats:
+    lock = threading.Lock()
+
+    def _send(chat_id):
         res = send_message(chat_id, text, parse_mode)
         if res and res.get("ok"):
             msg_id = res["result"]["message_id"]
-            sent_messages[chat_id] = msg_id
+            with lock:
+                sent_messages[chat_id] = msg_id
+
+    with ThreadPoolExecutor(max_workers=min(4, len(chats))) as pool:
+        list(pool.map(_send, chats))
     return sent_messages
 
 def send_document(chat_id, file_path, caption=None):
@@ -201,8 +270,15 @@ def broadcast_document(file_path, caption=None):
         send_document(chat_id, file_path, caption)
 
 def broadcast_edit(messages_map, text, parse_mode="Markdown"):
-    for chat_id, msg_id in messages_map.items():
+    if not messages_map:
+        return
+
+    def _edit(item):
+        chat_id, msg_id = item
         edit_message(chat_id, msg_id, text, parse_mode)
+
+    with ThreadPoolExecutor(max_workers=min(4, len(messages_map))) as pool:
+        list(pool.map(_edit, messages_map.items()))
 
 def pin_message(chat_id, message_id):
     params = {"chat_id": chat_id, "message_id": message_id}
@@ -472,6 +548,27 @@ def get_file_md5(file_path):
     except Exception:
         return "Unknown"
 
+def extract_error_snippet(top_path, max_lines=20, max_chars=1500):
+    """Extract the last few lines of out/error.log for inline display."""
+    error_log_path = os.path.join(top_path, "out", "error.log")
+    if not os.path.exists(error_log_path):
+        return None
+    try:
+        with open(error_log_path, 'r', errors='ignore') as f:
+            lines = f.readlines()
+        # Strip ANSI escape codes
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        lines = [ansi_escape.sub('', l).rstrip() for l in lines]
+        snippet = "\n".join(lines[-max_lines:]).strip()
+        if not snippet:
+            return None
+        if len(snippet) > max_chars:
+            snippet = snippet[-max_chars:]
+        return snippet
+    except Exception as e:
+        print(f"[Post-Build] Error reading error.log: {e}", file=sys.stderr)
+        return None
+
 # Build Tracking Loop Thread
 def track_build_log(top_path):
     print(f"[Tracker] Starting log tracking for: {top_path}")
@@ -579,16 +676,23 @@ def update_live_progress(top_path):
     sys_info_quoted = make_quoted_block_html("🖥️ System info:", sys_stats)
     
     start_time_str = get_formatted_start_time(ctx["start_time"])
-    
+
     rom_name_esc = escape_html(rom_name)
     device_esc = escape_html(device)
     start_time_esc = escape_html(start_time_str)
     elapsed_esc = escape_html(elapsed_str)
     percentage_esc = escape_html(f"{percentage:.2f}%")
     actions_esc = escape_html(f"{completed}/{total}")
-    
+
+    # ETA estimation
+    eta_str = "N/A"
+    if percentage > 0:
+        eta_seconds = (elapsed / (percentage / 100.0)) - elapsed
+        if eta_seconds > 0:
+            eta_str = format_duration_verbose(eta_seconds)
+
     config_block = format_configuration_html(ctx)
-    
+
     text = (
         f"⚙️ <b>Build In Progress</b>\n"
         f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
@@ -596,7 +700,8 @@ def update_live_progress(top_path):
         f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
         f"📈 <b>Progress:</b> <b>[{progress_bar}] {percentage_esc}</b>\n"
         f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
-        f"⏱️ <b>Elapsed:</b> <b>{elapsed_esc}</b>\n\n"
+        f"⏱️ <b>Elapsed:</b> <b>{elapsed_esc}</b>\n"
+        f"⏳ <b>ETA:</b> <b>{escape_html(eta_str)}</b>\n\n"
         f"{config_block}\n\n"
         f"{sys_info_quoted}"
     )
@@ -607,7 +712,7 @@ def update_live_progress(top_path):
 def telegram_polling():
     print("[Telegram] Starting bot command polling loop...")
     offset = 0
-    
+
     # Send a startup notification to server logs
     res = telegram_api_call("getMe")
     if res and res.get("ok"):
@@ -615,10 +720,13 @@ def telegram_polling():
         print(f"[Telegram] Connected as @{bot_user}")
     else:
         print("[Telegram] Failed to connect. Token might be missing or invalid.", file=sys.stderr)
-        
+
     while True:
         try:
-            updates = telegram_api_call("getUpdates", {"offset": offset, "timeout": 20})
+            # Use timeout=25 so Telegram's own 20s long-poll timeout fires first.
+            # This avoids the old bug where urllib's 10s timeout hit before Telegram's,
+            # generating a continuous spam of "The read operation timed out" errors.
+            updates = telegram_api_call("getUpdates", {"offset": offset, "timeout": 20}, timeout=25)
             if updates and updates.get("ok") and updates.get("result"):
                 for update in updates["result"]:
                     offset = update["update_id"] + 1
@@ -627,7 +735,7 @@ def telegram_polling():
                         handle_telegram_message(message)
         except Exception as e:
             print(f"[Telegram] Polling loop exception: {e}", file=sys.stderr)
-        time.sleep(1.0)
+        time.sleep(0.5)
 
 def handle_telegram_message(msg):
     chat_id = msg["chat"]["id"]
@@ -705,11 +813,27 @@ def handle_telegram_message(msg):
     elif text.startswith("/ping"):
         sent_date = msg.get("date")
         if sent_date:
-            elapsed = time.time() - sent_date
-            resp_str = f" *{int(elapsed * 1000)}ms*"
+            elapsed_ms = int((time.time() - sent_date) * 1000)
+            resp_str = f" *{elapsed_ms}ms*"
         else:
             resp_str = ""
         send_message(chat_id, f"🏓 *Pong!*{resp_str}")
+
+    elif text.startswith("/help"):
+        help_text = (
+            f"📚 *Build Tracker Bot Commands*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• */start* — Welcome message and bot intro.\n"
+            f"• */subscribe* — Subscribe this chat to build alerts.\n"
+            f"• */unsubscribe* — Unsubscribe this chat from alerts.\n"
+            f"• */status* — Show all active builds with progress.\n"
+            f"• */sysinfo* — Show server CPU/RAM/Disk stats.\n"
+            f"• */ping* — Check bot latency.\n"
+            f"• */help* — Show this command list.\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💡 Use `m bacon`, `mka`, or `make` in your AOSP source tree to trigger build tracking."
+        )
+        send_message(chat_id, help_text)
 
 def process_post_build(top_path, ctx, exit_code):
     time.sleep(1.5)
@@ -884,6 +1008,11 @@ def process_post_build(top_path, ctx, exit_code):
         if os.path.exists(dtbo_img):
             upload_queue.append(("DTBO_IMG", dtbo_img))
             
+        # init_boot.img (newer devices)
+        init_boot_img = os.path.join(product_dir, "init_boot.img")
+        if os.path.exists(init_boot_img):
+            upload_queue.append(("INIT_BOOT", init_boot_img))
+
         # recovery.img / vendor_boot.img (whichever is available)
         recovery_img = os.path.join(product_dir, "recovery.img")
         vendor_boot = os.path.join(product_dir, "vendor_boot.img")
@@ -918,24 +1047,27 @@ def process_post_build(top_path, ctx, exit_code):
                 "link": ""
             })
         
-        # Upload loop
-        for item in files_metadata:
-            # Update status in TG
-            current_status = (
-                f"✅ <b>Build Completed</b>\n"
-                f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
-                f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
-                f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
-                f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
-                f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
-                f"{config_block}\n\n"
-                f"📤 <b>Uploading:</b> <code>{escape_html(item['name'])}</code> to Gofile..."
-            )
-            broadcast_edit(processing_msg, current_status, parse_mode="HTML")
-            
-            url = upload_to_gofile(item['path'])
+        # Upload all files concurrently via thread pool
+        names_for_status = ", ".join(escape_html(it["name"]) for it in files_metadata)
+        current_status = (
+            f"✅ <b>Build Completed</b>\n"
+            f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+            f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+            f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+            f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+            f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
+            f"{config_block}\n\n"
+            f"📤 <b>Uploading:</b> <code>{names_for_status}</code> to Gofile..."
+        )
+        broadcast_edit(processing_msg, current_status, parse_mode="HTML")
+
+        def _upload_one(item):
+            url = upload_to_gofile(item["path"])
             if url:
-                item['link'] = url
+                item["link"] = url
+
+        with ThreadPoolExecutor(max_workers=min(4, len(files_metadata))) as pool:
+            list(pool.map(_upload_one, files_metadata))
                 
         # Build files lines for collapsible quote box
         files_lines = []
@@ -973,6 +1105,13 @@ def process_post_build(top_path, ctx, exit_code):
         
     else:
         # Failure logic
+        error_snippet = extract_error_snippet(top_path)
+        snippet_block = ""
+        if error_snippet:
+            snippet_block = (
+                f"\n\n📄 <b>Error Snippet (last lines):</b>\n"
+                f"<pre>{escape_html(error_snippet)}</pre>"
+            )
         failure_card = (
             f"❌ <b>Build Failed</b>\n"
             f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
@@ -982,6 +1121,7 @@ def process_post_build(top_path, ctx, exit_code):
             f"🛠️ <b>Actions:</b> <b>{actions_esc} (1 failed)</b>\n"
             f"{config_block}\n\n"
             f"📄 Check logs for details. Error log uploaded if available."
+            f"{snippet_block}"
         )
         broadcast_message(failure_card, parse_mode="HTML")
         
