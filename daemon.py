@@ -822,16 +822,37 @@ def update_live_progress(top_path):
     
     broadcast_edit(messages_map, text, parse_mode="HTML")
 
+def send_startup_message():
+    text = "🤖 *Bot is online!* Ready to track builds."
+    recipients = set(CONFIG.get("subscribed_chats", []))
+    owner = get_owner_id()
+    if owner:
+        recipients.add(owner)
+    for cid in recipients:
+        try:
+            send_message(cid, text)
+        except Exception as e:
+            print(f"[Telegram] Error sending startup message to {cid}: {e}", file=sys.stderr)
+    if recipients:
+        print(f"[Telegram] Sent startup welcome message to {len(recipients)} chat(s).")
+
 # Telegram polling daemon
 def telegram_polling():
     print("[Telegram] Starting bot command polling loop...")
     offset = 0
 
-    # Send a startup notification to server logs
-    res = telegram_api_call("getMe")
+    # Send a startup notification to server logs and subscribed chats
+    res = None
+    for _ in range(5):
+        res = telegram_api_call("getMe")
+        if res and res.get("ok"):
+            break
+        time.sleep(2)
+
     if res and res.get("ok"):
         bot_user = res["result"]["username"]
         print(f"[Telegram] Connected as @{bot_user}")
+        send_startup_message()
     else:
         print("[Telegram] Failed to connect. Token might be missing or invalid.", file=sys.stderr)
 
