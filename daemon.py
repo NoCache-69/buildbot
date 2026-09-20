@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
 import datetime
+import platform
 
 # Configuration path
 def get_config_path():
@@ -30,12 +31,14 @@ CONFIG_PATH = get_config_path()
 DEFAULT_PORT = 8080
 
 def load_config():
+    default_config = {
+        "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+        "owner_id": None,
+        "admin_ids": [],
+        "subscribed_chats": [],
+        "port": DEFAULT_PORT
+    }
     if not os.path.exists(CONFIG_PATH):
-        default_config = {
-            "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
-            "subscribed_chats": [],
-            "port": DEFAULT_PORT
-        }
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         with open(CONFIG_PATH, 'w') as f:
             json.dump(default_config, f, indent=4)
@@ -43,10 +46,15 @@ def load_config():
     
     try:
         with open(CONFIG_PATH, 'r') as f:
-            return json.load(f)
+            cfg = json.load(f)
+            if "owner_id" not in cfg and "owner" not in cfg:
+                cfg["owner_id"] = None
+            if "admin_ids" not in cfg and "admins" not in cfg:
+                cfg["admin_ids"] = []
+            return cfg
     except Exception as e:
         print(f"Error reading config: {e}", file=sys.stderr)
-        return {"bot_token": "YOUR_TELEGRAM_BOT_TOKEN", "subscribed_chats": [], "port": DEFAULT_PORT}
+        return default_config
 
 def save_config(config):
     try:
@@ -54,6 +62,51 @@ def save_config(config):
             json.dump(config, f, indent=4)
     except Exception as e:
         print(f"Error saving config: {e}", file=sys.stderr)
+
+# Permission helper functions (3 tiers: Owner, Admin/Sudo, User)
+def get_owner_id(cfg=None):
+    c = cfg if cfg is not None else CONFIG
+    val = c.get("owner_id")
+    if val is None:
+        val = c.get("owner")
+    if val is not None and str(val).isdigit():
+        return int(val)
+    return val
+
+def get_admin_ids(cfg=None):
+    c = cfg if cfg is not None else CONFIG
+    admins = c.get("admin_ids")
+    if admins is None:
+        admins = c.get("admins")
+    if not admins or not isinstance(admins, list):
+        return []
+    result = []
+    for a in admins:
+        if str(a).isdigit():
+            result.append(int(a))
+        else:
+            result.append(a)
+    return result
+
+def is_owner(user_id, cfg=None):
+    owner = get_owner_id(cfg)
+    if owner is None:
+        return False
+    return user_id == owner or str(user_id) == str(owner)
+
+def is_sudo(user_id, cfg=None):
+    if is_owner(user_id, cfg):
+        return True
+    admins = get_admin_ids(cfg)
+    return user_id in admins or str(user_id) in [str(a) for a in admins]
+
+def get_user_role(user_id, cfg=None):
+    if is_owner(user_id, cfg):
+        return "owner"
+    elif is_sudo(user_id, cfg):
+        return "admin"
+    else:
+        return "user"
 
 def upload_to_gofile(file_path):
     if not os.path.exists(file_path):
@@ -361,6 +414,30 @@ def get_uptime_str():
     except Exception:
         return "Unknown"
 
+def get_os_info():
+    try:
+        if hasattr(platform, 'freedesktop_os_release'):
+            try:
+                info = platform.freedesktop_os_release()
+                if "PRETTY_NAME" in info:
+                    return info["PRETTY_NAME"]
+            except Exception:
+                pass
+        if os.path.exists('/etc/os-release'):
+            with open('/etc/os-release', 'r') as f:
+                for line in f:
+                    if line.startswith('PRETTY_NAME='):
+                        return line.split('=', 1)[1].strip().strip('"\'')
+    except Exception:
+        pass
+    return f"{platform.system()} {platform.release()}"
+
+def get_kernel_version():
+    try:
+        return platform.release()
+    except Exception:
+        return "Unknown"
+
 def get_sys_info():
     try:
         # CPU Info (Standard Library)
@@ -399,8 +476,12 @@ def get_sys_info():
             pass
             
         uptime_str = get_uptime_str()
+        os_info = get_os_info()
+        kernel_info = get_kernel_version()
         
         return (
+            f"🐧 OS: {os_info}\n"
+            f"🧬 Kernel: {kernel_info}\n"
             f"⚙️ CPU Load: {cpu_percent:.1f}% (Cores: {cpu_count}, 1m avg: {load_avg[0]:.2f})\n"
             f"💾 RAM Usage: {ram_used_gb:.1f} / {ram_total_gb:.1f} GB ({ram_percent:.1f}%)\n"
             f"📁 Disk Space: {disk_free_gb:.1f} GB free of {disk_total_gb:.1f} GB ({disk_percent:.1f}% used)\n"
@@ -408,6 +489,38 @@ def get_sys_info():
         )
     except Exception as e:
         return f"Error getting system info: {e}"
+
+def _do_shutdown(chat_id):
+    try:
+        subprocess.run(["sudo", "shutdown", "-h", "now"], check=True)
+    except Exception as e:
+        print(f"[System] Shutdown error: {e}", file=sys.stderr)
+        send_message(chat_id, f"❌ *Shutdown failed:* `{escape_markdown(str(e))}`")
+
+def _do_reboot(chat_id):
+    try:
+        subprocess.run(["sudo", "reboot"], check=True)
+    except Exception as e:
+        print(f"[System] Reboot error: {e}", file=sys.stderr)
+        send_message(chat_id, f"❌ *Reboot failed:* `{escape_markdown(str(e))}`")
+
+def _do_restart(chat_id):
+    try:
+        res = subprocess.run(["systemctl", "--user", "is-active", "--quiet", "tg-build-bot.service"])
+        if res.returncode == 0:
+            subprocess.run(["systemctl", "--user", "restart", "tg-build-bot.service"], check=True)
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            start_script = os.path.join(script_dir, "start_bot.sh")
+            if os.path.exists(start_script):
+                subprocess.Popen(["/bin/bash", start_script])
+                sys.exit(0)
+            else:
+                python = sys.executable
+                os.execv(python, [python] + sys.argv)
+    except Exception as e:
+        print(f"[Bot] Restart error: {e}", file=sys.stderr)
+        send_message(chat_id, f"❌ *Restart failed:* `{escape_markdown(str(e))}`")
 
 def get_rom_name(top_path):
     config_path = os.path.join(top_path, ".repo", "manifests.git", "config")
@@ -740,9 +853,17 @@ def telegram_polling():
 
 def handle_telegram_message(msg):
     chat_id = msg["chat"]["id"]
-    text = msg["text"].strip()
+    text = msg.get("text", "").strip()
+    if not text:
+        return
     
-    if text.startswith("/start"):
+    sender = msg.get("from") or {}
+    user_id = sender.get("id") or chat_id
+    
+    parts = text.split()
+    cmd = parts[0].split('@')[0].lower()
+    
+    if cmd == "/start":
         welcome = (
             f"🚀 *AOSP Build Tracker Bot*\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -751,12 +872,13 @@ def handle_telegram_message(msg):
             f"• `/subscribe` - Add this chat/group to receive live build alerts.\n"
             f"• `/unsubscribe` - Remove this chat from receiving alerts.\n"
             f"• `/status` - Check current active build progress.\n"
-            f"• `/sysinfo` - View server CPU, RAM, and Disk storage.\n"
-            f"• `/ping` - Check if the bot is alive and active."
+            f"• `/specs` - View server specs (OS, Kernel, CPU, RAM, Disk).\n"
+            f"• `/ping` - Check if the bot is alive and active.\n"
+            f"• `/help` - View complete command list."
         )
         send_message(chat_id, welcome)
         
-    elif text.startswith("/subscribe"):
+    elif cmd == "/subscribe":
         config = CONFIG
         if chat_id not in config["subscribed_chats"]:
             config["subscribed_chats"].append(chat_id)
@@ -765,7 +887,7 @@ def handle_telegram_message(msg):
         else:
             send_message(chat_id, "ℹ️ This chat is *already* subscribed to build updates.")
             
-    elif text.startswith("/unsubscribe"):
+    elif cmd == "/unsubscribe":
         config = CONFIG
         if chat_id in config["subscribed_chats"]:
             config["subscribed_chats"].remove(chat_id)
@@ -774,7 +896,7 @@ def handle_telegram_message(msg):
         else:
             send_message(chat_id, "ℹ️ This chat was not subscribed.")
             
-    elif text.startswith("/status"):
+    elif cmd == "/status":
         with ACTIVE_BUILDS_LOCK:
             active_list = list(ACTIVE_BUILDS.values())
             
@@ -804,14 +926,14 @@ def handle_telegram_message(msg):
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
             )
         sys_info = get_sys_info()
-        status_text += f"\n🖥️ *System Info:*\n```\n{sys_info}\n```"
+        status_text += f"\n🖥️ *System Specs:*\n```\n{sys_info}\n```"
         send_message(chat_id, status_text)
         
-    elif text.startswith("/sysinfo"):
+    elif cmd in ("/specs", "/sysinfo"):
         sys_info = get_sys_info()
-        send_message(chat_id, f"🖥️ *Build Server Stats:*\n━━━━━━━━━━━━━━━━━━━━━\n```\n{sys_info}\n```")
+        send_message(chat_id, f"🖥️ *Build Server Specs:*\n━━━━━━━━━━━━━━━━━━━━━\n```\n{sys_info}\n```")
         
-    elif text.startswith("/ping"):
+    elif cmd == "/ping":
         sent_date = msg.get("date")
         if sent_date:
             elapsed_ms = int((time.time() - sent_date) * 1000)
@@ -820,21 +942,139 @@ def handle_telegram_message(msg):
             resp_str = ""
         send_message(chat_id, f"🏓 *Pong!*{resp_str}")
 
-    elif text.startswith("/help"):
+    elif cmd == "/help":
         help_text = (
             f"📚 *Build Tracker Bot Commands*\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"• */start* — Welcome message and bot intro.\n"
-            f"• */subscribe* — Subscribe this chat to build alerts.\n"
-            f"• */unsubscribe* — Unsubscribe this chat from alerts.\n"
-            f"• */status* — Show all active builds with progress.\n"
-            f"• */sysinfo* — Show server CPU/RAM/Disk stats.\n"
-            f"• */ping* — Check bot latency.\n"
-            f"• */help* — Show this command list.\n"
+            f"👤 *Public Commands:*\n"
+            f"• `/start` — Welcome message and bot intro.\n"
+            f"• `/subscribe` — Subscribe this chat to build alerts.\n"
+            f"• `/unsubscribe` — Unsubscribe this chat from alerts.\n"
+            f"• `/status` — Show all active builds with progress.\n"
+            f"• `/specs` — Show server specs (OS, Kernel, CPU, RAM, Disk).\n"
+            f"• `/ping` — Check bot latency.\n"
+            f"• `/help` — Show this command list.\n\n"
+            f"🛡️ *Sudo Commands (Admin/Owner):*\n"
+            f"• `/shutdown` — Safely shut down the server.\n"
+            f"• `/reboot` — Reboot the server.\n"
+            f"• `/restart` — Restart the bot service.\n"
+            f"• `/sudolist` — List configured sudo admins.\n\n"
+            f"👑 *Owner Commands:*\n"
+            f"• `/addsudo <user_id>` — Add a user to sudo admins.\n"
+            f"• `/delsudo <user_id>` — Remove a user from sudo admins.\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"💡 Use `m bacon`, `mka`, or `make` in your AOSP source tree to trigger build tracking."
         )
         send_message(chat_id, help_text)
+
+    elif cmd == "/addsudo":
+        if not is_owner(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* Only the bot owner can add sudo users.")
+            return
+
+        target_id = None
+        reply = msg.get("reply_to_message")
+        if reply and reply.get("from"):
+            target_id = reply["from"].get("id")
+        elif len(parts) > 1:
+            arg = parts[1].strip()
+            if arg.lstrip('-').isdigit():
+                target_id = int(arg)
+            elif arg.startswith('@'):
+                send_message(chat_id, f"⚠️ Cannot resolve username `{arg}` directly. Please use the user's numeric ID (e.g. `/addsudo 123456789`) or reply to their message with `/addsudo`.")
+                return
+
+        if not target_id:
+            send_message(chat_id, "ℹ️ *Usage:* `/addsudo <user_id>` or reply to a user's message with `/addsudo`")
+            return
+
+        if is_owner(target_id):
+            send_message(chat_id, f"ℹ️ User `{target_id}` is already the bot owner.")
+            return
+
+        admin_ids = get_admin_ids()
+        if target_id in admin_ids or str(target_id) in [str(a) for a in admin_ids]:
+            send_message(chat_id, f"ℹ️ User `{target_id}` is already a sudo admin.")
+            return
+
+        if "admin_ids" not in CONFIG or not isinstance(CONFIG["admin_ids"], list):
+            CONFIG["admin_ids"] = []
+        CONFIG["admin_ids"].append(target_id)
+        save_config(CONFIG)
+        send_message(chat_id, f"✅ *Success:* User `{target_id}` has been added as a sudo admin.")
+
+    elif cmd in ("/delsudo", "/rmsudo"):
+        if not is_owner(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* Only the bot owner can remove sudo users.")
+            return
+
+        target_id = None
+        reply = msg.get("reply_to_message")
+        if reply and reply.get("from"):
+            target_id = reply["from"].get("id")
+        elif len(parts) > 1:
+            arg = parts[1].strip()
+            if arg.lstrip('-').isdigit():
+                target_id = int(arg)
+
+        if not target_id:
+            send_message(chat_id, "ℹ️ *Usage:* `/delsudo <user_id>` or reply to a user's message with `/delsudo`")
+            return
+
+        admin_ids = get_admin_ids()
+        if target_id not in admin_ids and str(target_id) not in [str(a) for a in admin_ids]:
+            send_message(chat_id, f"ℹ️ User `{target_id}` is not in the sudo admin list.")
+            return
+
+        CONFIG["admin_ids"] = [a for a in admin_ids if a != target_id and str(a) != str(target_id)]
+        if "admins" in CONFIG and isinstance(CONFIG["admins"], list):
+            CONFIG["admins"] = [a for a in CONFIG["admins"] if a != target_id and str(a) != str(target_id)]
+        save_config(CONFIG)
+        send_message(chat_id, f"✅ *Success:* User `{target_id}` removed from sudo admins.")
+
+    elif cmd in ("/sudolist", "/admins"):
+        if not is_sudo(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
+            return
+
+        owner = get_owner_id()
+        admins = get_admin_ids()
+        role = get_user_role(user_id)
+        
+        text = f"👑 *Bot Roles & Permissions*\n━━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"👑 *Owner:* `{owner if owner is not None else 'Not Configured'}`\n"
+        if admins:
+            admins_str = "\n".join([f"• `{a}`" for a in admins])
+            text += f"🛡️ *Sudo Admins ({len(admins)}):*\n{admins_str}\n"
+        else:
+            text += f"🛡️ *Sudo Admins:* _None_\n"
+        text += f"━━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"👤 *Your Role:* *{role.capitalize()}*"
+        send_message(chat_id, text)
+
+    elif cmd == "/shutdown":
+        if not is_sudo(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
+            return
+
+        send_message(chat_id, "🛑 *Shutting down the server now...*")
+        threading.Timer(1.5, _do_shutdown, args=[chat_id]).start()
+
+    elif cmd == "/reboot":
+        if not is_sudo(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
+            return
+
+        send_message(chat_id, "🔄 *Rebooting the server now...*")
+        threading.Timer(1.5, _do_reboot, args=[chat_id]).start()
+
+    elif cmd == "/restart":
+        if not is_sudo(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
+            return
+
+        send_message(chat_id, "🔄 *Restarting bot service now...*")
+        threading.Timer(1.5, _do_restart, args=[chat_id]).start()
 
 # Detect the newest ROM zip and matching OTA JSON across various ROM naming conventions
 def parse_filename_epoch(filename, ref_year=None):

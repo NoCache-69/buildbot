@@ -11,7 +11,7 @@ An elegant, zero-dependency background Telegram bot built in Python to track And
 - **👤 Multi-User & Multi-Server Attribution**: Tracks and displays the system username and server hostname (e.g., `Builder: dev`, `Host: build-srv-1`) on all progress cards, status checks, and completion alerts. This makes it perfect for teams sharing a single Telegram channel across different servers.
 - **💾 Auto-Discovered Outputs**: Displays output ZIP package details (filename and file size) upon a successful build.
 - **🔍 Error Snippet Capture**: If a build fails, the last 25 lines of the compiler output are automatically extracted, formatted, and delivered directly to Telegram.
-- **🖥️ System Health Metrics**: Check build server load (`/sysinfo`) to monitor CPU load, RAM usage, and available disk space.
+- **🖥️ System Health Metrics**: Check build server performance (`/specs`) to monitor OS release, kernel version, CPU load, RAM usage, and available disk space.
 - **⚙️ Seamless Background Service**: Easily configured as a systemd user-level service (`tg-build-bot.service`), running persistently without root permissions.
 
 ---
@@ -36,10 +36,12 @@ Follow these simple steps to configure and start your background build tracking 
 3. Copy the HTTP API token generated for you (e.g., `8834515366:AAHjs...`).
 
 ### 2️⃣ Configure Bot Settings
-Open your configuration file at `~/.config/tg_build_bot/config.json` (created automatically by `install.sh`) and replace `"YOUR_TELEGRAM_BOT_TOKEN"` with your actual Telegram bot token:
+Open your configuration file at `~/.config/tg_build_bot/config.json` (created automatically by `install.sh`) and configure your bot token and owner Telegram user ID:
 ```json
 {
     "bot_token": "8834515366:AAHjsHbdXWKDvgiJRhp53juv3WHu6iTtljc",
+    "owner_id": 123456789,
+    "admin_ids": [],
     "subscribed_chats": [],
     "port": 8080
 }
@@ -98,15 +100,35 @@ source ~/.bashrc
 
 ## 📱 Telegram Commands Reference
 
-Send these commands directly to the bot inside your subscribed chats:
+The bot features a 3-tier role-based permission system:
+- **Owner**: Configured via `owner_id` in `config.json`. Can manage sudo admins via `/addsudo` and `/delsudo`.
+- **Admins (Sudo)**: Authorized via `/addsudo`. Can execute server management commands (`/shutdown`, `/reboot`, `/restart`, `/sudolist`).
+- **Users**: Open access to all standard tracking and informational commands. Unauthorized attempts to execute sudo or owner commands trigger a warning message.
 
+### 👤 Public Commands (All Users)
 | Command | Action |
 | :--- | :--- |
 | **`/start`** | Welcomes users and displays all available tracking commands. |
 | **`/subscribe`** | Subscribes the current chat, group, or channel to live build updates. |
 | **`/unsubscribe`** | Stops sending build alerts to the current chat. |
 | **`/status`** | Displays details about any currently compiling ROMs (elapsed, ETA, compilation bar, compiler tasks). |
-| **`/sysinfo`** | Shows build server performance specs (CPU load, RAM consumption, and Free Disk space). |
+| **`/specs`** | Shows server specs including OS distribution, Linux kernel version, CPU load, RAM usage, and free disk space (alias: `/sysinfo`). |
+| **`/ping`** | Checks bot response latency. |
+| **`/help`** | Displays the command reference list. |
+
+### 🛡️ Sudo Commands (Admins & Owner)
+| Command | Action |
+| :--- | :--- |
+| **`/shutdown`** | Safely powers off the server via `sudo shutdown -h now`. |
+| **`/reboot`** | Reboots the server via `sudo reboot`. |
+| **`/restart`** | Restarts the bot background service (via `systemctl --user restart tg-build-bot.service`). |
+| **`/sudolist`** | Lists the bot owner and all registered sudo admins (alias: `/admins`). |
+
+### 👑 Owner Commands (Owner Only)
+| Command | Action |
+| :--- | :--- |
+| **`/addsudo <id>`** | Adds a user to the sudo admins list (supports reply to user message or numeric ID). |
+| **`/delsudo <id>`** | Removes a user from the sudo admins list (alias: `/rmsudo`). |
 
 ---
 

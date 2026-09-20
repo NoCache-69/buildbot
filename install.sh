@@ -32,6 +32,8 @@ elif [ ! -f "$USER_CONFIG_FILE" ]; then
     cat <<EOF > "$USER_CONFIG_FILE"
 {
     "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "owner_id": null,
+    "admin_ids": [],
     "subscribed_chats": [],
     "port": 8080
 }
