@@ -13,6 +13,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
+import datetime
 
 # Configuration path
 def get_config_path():
@@ -835,6 +836,189 @@ def handle_telegram_message(msg):
         )
         send_message(chat_id, help_text)
 
+# Detect the newest ROM zip and matching OTA JSON across various ROM naming conventions
+def parse_filename_epoch(filename, ref_year=None):
+    if ref_year is None:
+        ref_year = datetime.datetime.now().year
+
+    m = re.search(r"(20[2-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[-_]([01]\d|2[0-3])([0-5]\d)([0-5]\d)(?!\d)", filename)
+    if m:
+        dt = datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6)), tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), True
+
+    m = re.search(r"(20[2-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[-_]([01]\d|2[0-3])([0-5]\d)(?!\d)", filename)
+    if m:
+        dt = datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)), 0, tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), True
+
+    m = re.search(r"(20[2-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])([0-5]\d)([0-5]\d)(?!\d)", filename)
+    if m:
+        dt = datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6)), tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), True
+
+    m = re.search(r"(20[2-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])([0-5]\d)(?!\d)", filename)
+    if m:
+        dt = datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)), 0, tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), True
+
+    m = re.search(r"(20[2-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])(?!\d)", filename)
+    if m:
+        dt = datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), 0, 0, tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), True
+
+    m = re.search(r"(20[2-3]\d)[-\.](0[1-9]|1[0-2])[-\.](0[1-9]|[12]\d|3[01])(?:[-_]([01]\d|2[0-3])(?::?([0-5]\d))?)?(?!\d)", filename)
+    if m:
+        h = int(m.group(4)) if m.group(4) else 0
+        mn = int(m.group(5)) if m.group(5) else 0
+        dt = datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), h, mn, 0, tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), bool(m.group(4))
+
+    m = re.search(r"(20[2-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)", filename)
+    if m:
+        dt = datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), 0, 0, 0, tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), False
+
+    m = re.search(r"(?:^|[^0-9])(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])([0-5]\d)(?:[^0-9]|$)", filename)
+    if m:
+        dt = datetime.datetime(ref_year, int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), 0, tzinfo=datetime.timezone.utc)
+        return dt.timestamp(), True
+
+    return 0.0, False
+
+def extract_json_zip_name(json_path):
+    try:
+        with open(json_path, "r", errors="ignore") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            if "response" in data and isinstance(data["response"], list) and len(data["response"]) > 0:
+                return data["response"][0].get("filename")
+            elif "filename" in data:
+                return data["filename"]
+    except Exception:
+        pass
+    return None
+
+def find_ota_json_files(product_dir, device=""):
+    d_short = device.split("_")[-1] if "_" in device else device
+    candidates = []
+    search_dirs = [product_dir]
+    try:
+        for entry in os.scandir(product_dir):
+            if entry.is_dir() and not entry.name.startswith("."):
+                search_dirs.append(entry.path)
+    except Exception:
+        pass
+
+    ignored_prefixes = (
+        "installed-files", "module-info", "apex_info", "target_files",
+        "compatibility_matrix", "device_manifest", "framework_manifest"
+    )
+
+    for sdir in search_dirs:
+        try:
+            for fname in os.listdir(sdir):
+                if not fname.endswith(".json") or fname.startswith("."):
+                    continue
+                if any(fname.startswith(p) for p in ignored_prefixes):
+                    continue
+                candidates.append(os.path.join(sdir, fname))
+        except Exception:
+            pass
+
+    return candidates
+
+def find_best_rom_zip(product_dir, device="", start_time=None, top_path=None, return_score=False):
+    if not product_dir or not os.path.isdir(product_dir):
+        return (None, None, None) if return_score else (None, None)
+
+    d_short = device.split("_")[-1] if "_" in device else device
+    ref_year = datetime.datetime.fromtimestamp(start_time, tz=datetime.timezone.utc).year if start_time else datetime.datetime.now().year
+
+    ota_jsons = find_ota_json_files(product_dir, device)
+    if not ota_jsons and top_path:
+        out_prod = os.path.join(top_path, "out", "target", "product")
+        if os.path.isdir(out_prod):
+            try:
+                for root, dirs, files in os.walk(out_prod):
+                    rel = os.path.relpath(root, out_prod)
+                    if rel.count(os.sep) >= 3:
+                        dirs.clear()
+                    for f in files:
+                        if f.endswith(".json") and not f.startswith("."):
+                            if not any(f.startswith(p) for p in ("installed-files", "module-info", "apex_info", "target_files")):
+                                if d_short and d_short.lower() in f.lower():
+                                    ota_jsons.append(os.path.join(root, f))
+            except Exception:
+                pass
+
+    json_map = {}
+    for jpath in ota_jsons:
+        ref_zip = extract_json_zip_name(jpath)
+        if ref_zip:
+            json_map[os.path.basename(ref_zip)] = jpath
+
+    ignored_substrings = ("target_files", "symbols", "otacerts", "tests")
+    candidates = []
+
+    try:
+        files = os.listdir(product_dir)
+    except Exception as e:
+        print(f"[Post-Build] Error listing product dir {product_dir}: {e}", file=sys.stderr)
+        return (None, None, None) if return_score else (None, None)
+
+    for fname in files:
+        if not fname.endswith(".zip") or fname.startswith("."):
+            continue
+        fl = fname.lower()
+        if any(ign in fl for ign in ignored_substrings):
+            continue
+
+        fpath = os.path.join(product_dir, fname)
+        if not os.path.isfile(fpath):
+            continue
+
+        try:
+            stat_res = os.stat(fpath)
+            fsize = stat_res.st_size
+            mtime = stat_res.st_mtime
+            ctime = stat_res.st_ctime
+        except Exception:
+            continue
+
+        fs_time = max(mtime, ctime)
+        ts_epoch, has_time = parse_filename_epoch(fname, ref_year)
+        is_fresh = 1 if (start_time and fs_time >= (start_time - 120)) else 0
+        device_match = 1 if (d_short and d_short.lower() in fl) else 0
+        json_match = 1 if fname in json_map else 0
+        is_branded = 1 if (ts_epoch > 0 or json_match or not fl.endswith("-ota.zip")) else 0
+
+        score = (
+            device_match,
+            is_branded,
+            json_match,
+            ts_epoch,
+            is_fresh,
+            fs_time,
+            fsize
+        )
+        candidates.append((score, fpath))
+
+    if not candidates:
+        return (None, None, None) if return_score else (None, None)
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_zip = candidates[0]
+    best_zip_name = os.path.basename(best_zip)
+
+    matched_json = json_map.get(best_zip_name)
+    if not matched_json and ota_jsons:
+        device_jsons = [j for j in ota_jsons if (d_short and d_short.lower() in os.path.basename(j).lower())]
+        matched_json = max(device_jsons, key=os.path.getmtime) if device_jsons else max(ota_jsons, key=os.path.getmtime)
+
+    if return_score:
+        return best_zip, matched_json, best_score
+    return best_zip, matched_json
+
 def process_post_build(top_path, ctx, exit_code):
     time.sleep(1.5)
     
@@ -919,7 +1103,14 @@ def process_post_build(top_path, ctx, exit_code):
                         if any(f.endswith(".zip") for f in os.listdir(sd)):
                             matching_dirs.append(sd)
                     if matching_dirs:
-                        product_dir = max(matching_dirs, key=os.path.getmtime)
+                        best_sd = None
+                        best_score = None
+                        for sd in matching_dirs:
+                            best_z, _, score = find_best_rom_zip(sd, device, start_time=ctx.get("start_time"), top_path=top_path, return_score=True)
+                            if best_z and (best_score is None or score > best_score):
+                                best_sd = sd
+                                best_score = score
+                        product_dir = best_sd if best_sd else max(matching_dirs, key=os.path.getmtime)
                 except Exception as e:
                     print(f"[Post-Build] Exception scanning base product path: {e}", file=sys.stderr)
                     
@@ -940,21 +1131,7 @@ def process_post_build(top_path, ctx, exit_code):
             
         print(f"[Post-Build] Located product directory: {product_dir}")
         
-        # Detect ZIP file (excluding target_files, preferring non-ota zips)
-        rom_zip = None
-        try:
-            zip_files = []
-            for f in os.listdir(product_dir):
-                if f.endswith(".zip") and not "target_files" in f.lower():
-                    zip_files.append(os.path.join(product_dir, f))
-            if zip_files:
-                non_ota = [z for z in zip_files if "ota" not in os.path.basename(z).lower()]
-                if non_ota:
-                    rom_zip = max(non_ota, key=os.path.getmtime)
-                else:
-                    rom_zip = max(zip_files, key=os.path.getmtime)
-        except Exception as e:
-            print(f"[Post-Build] Exception scanning ZIP files: {e}", file=sys.stderr)
+        rom_zip, json_file = find_best_rom_zip(product_dir, device, start_time=ctx.get("start_time"), top_path=top_path)
             
         if not rom_zip:
             failed_card = (
@@ -969,30 +1146,10 @@ def process_post_build(top_path, ctx, exit_code):
             )
             broadcast_edit(processing_msg, failed_card, parse_mode="HTML")
             return
-            
-        # Detect OTA JSON file
-        json_file = None
-        try:
-            device_query = device.split('_')[-1] if '_' in device else device
-            json_candidates = []
-            for f in os.listdir(product_dir):
-                if f.endswith(".json") and (device.lower() in f.lower() or device_query.lower() in f.lower()):
-                    json_candidates.append(os.path.join(product_dir, f))
-            if json_candidates:
-                json_file = max(json_candidates, key=os.path.getmtime)
-            else:
-                # Search recursively under top_path/out/
-                out_dir = os.path.join(top_path, "out")
-                if os.path.isdir(out_dir):
-                    for root, dirs, files in os.walk(out_dir):
-                        for f in files:
-                            if f.endswith(".json") and (device.lower() in f.lower() or device_query.lower() in f.lower()):
-                                json_file = os.path.join(root, f)
-                                break
-                        if json_file:
-                            break
-        except Exception as e:
-            print(f"[Post-Build] Exception searching JSON: {e}", file=sys.stderr)
+
+        print(f"[Post-Build] Selected newest ROM zip: {rom_zip}")
+        if json_file:
+            print(f"[Post-Build] Selected matching OTA JSON: {json_file}")
  
         # Detect other files
         upload_queue = []
