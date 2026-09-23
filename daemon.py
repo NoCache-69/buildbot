@@ -174,6 +174,7 @@ def upload_to_gofile(file_path):
 CONFIG = load_config()
 ACTIVE_BUILDS = {}  # key: top_path, value: build_context dict
 ACTIVE_BUILDS_LOCK = threading.Lock()
+BOT_USERNAME = None
 
 # --- Persistent connection pool for Telegram API ---
 # Avoids TCP+TLS handshake per API call and supports concurrent access via
@@ -357,6 +358,131 @@ def escape_html(text):
     if text is None:
         return ""
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+# Bot command definitions for Telegram command autocomplete / preview
+BOT_COMMANDS_DEFAULT = [
+    {"command": "status", "description": "Check current active build progress"},
+    {"command": "subscribe", "description": "Subscribe this chat to live build alerts"},
+    {"command": "unsubscribe", "description": "Unsubscribe this chat from build alerts"},
+    {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "ping", "description": "Check bot latency and responsiveness"},
+    {"command": "help", "description": "View complete command list and guide"},
+    {"command": "start", "description": "Start the bot and view welcome info"},
+]
+
+BOT_COMMANDS_GROUP = [
+    {"command": "status", "description": "Check current active build progress"},
+    {"command": "subscribe", "description": "Subscribe this group to live build alerts"},
+    {"command": "unsubscribe", "description": "Unsubscribe this group from build alerts"},
+    {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "ping", "description": "Check bot latency and responsiveness"},
+    {"command": "help", "description": "View complete command list and guide"},
+    {"command": "start", "description": "View bot introduction and info"},
+]
+
+BOT_COMMANDS_PRIVATE = [
+    {"command": "start", "description": "Start the bot and view welcome info"},
+    {"command": "status", "description": "Check current active build progress"},
+    {"command": "subscribe", "description": "Subscribe this chat to live build alerts"},
+    {"command": "unsubscribe", "description": "Unsubscribe this chat from build alerts"},
+    {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "ping", "description": "Check bot latency and responsiveness"},
+    {"command": "help", "description": "View complete command list and guide"},
+]
+
+BOT_COMMANDS_SUDO = [
+    {"command": "start", "description": "Start the bot and view welcome info"},
+    {"command": "status", "description": "Check current active build progress"},
+    {"command": "subscribe", "description": "Subscribe this chat to live build alerts"},
+    {"command": "unsubscribe", "description": "Unsubscribe this chat from build alerts"},
+    {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "ping", "description": "Check bot latency and responsiveness"},
+    {"command": "help", "description": "View complete command list and guide"},
+    {"command": "sudolist", "description": "List configured bot sudo admins"},
+    {"command": "restart", "description": "Restart the bot service (sudo)"},
+    {"command": "reboot", "description": "Reboot the build server (sudo)"},
+    {"command": "shutdown", "description": "Safely shut down the server (sudo)"},
+]
+
+BOT_COMMANDS_OWNER = BOT_COMMANDS_SUDO + [
+    {"command": "addsudo", "description": "Add a user to sudo admins (owner)"},
+    {"command": "delsudo", "description": "Remove a user from sudo admins (owner)"},
+]
+
+def register_user_commands(user_id, role="admin"):
+    """Register custom command preview scope for a specific admin or owner chat."""
+    try:
+        uid = int(user_id) if str(user_id).isdigit() else user_id
+        cmds = BOT_COMMANDS_OWNER if role == "owner" else BOT_COMMANDS_SUDO
+        res = telegram_api_call("setMyCommands", {
+            "commands": cmds,
+            "scope": {"type": "chat", "chat_id": uid}
+        })
+        return bool(res and res.get("ok"))
+    except Exception as e:
+        print(f"[Telegram] Error registering custom commands for {user_id}: {e}", file=sys.stderr)
+        return False
+
+def unregister_user_commands(user_id):
+    """Remove custom command preview scope for a user, reverting them to default/private scope."""
+    try:
+        uid = int(user_id) if str(user_id).isdigit() else user_id
+        res = telegram_api_call("deleteMyCommands", {
+            "scope": {"type": "chat", "chat_id": uid}
+        })
+        return bool(res and res.get("ok"))
+    except Exception as e:
+        print(f"[Telegram] Error deleting custom commands for {user_id}: {e}", file=sys.stderr)
+        return False
+
+def setup_bot_commands():
+    """Register command lists and descriptions with Telegram for command preview / autocomplete across all scopes."""
+    print("[Telegram] Registering bot commands for previews across chats and groups...")
+    try:
+        # 1. Default fallback scope for any chat
+        telegram_api_call("setMyCommands", {
+            "commands": BOT_COMMANDS_DEFAULT,
+            "scope": {"type": "default"}
+        })
+
+        # 2. All group and supergroup chats
+        telegram_api_call("setMyCommands", {
+            "commands": BOT_COMMANDS_GROUP,
+            "scope": {"type": "all_group_chats"}
+        })
+
+        # 3. Group administrators
+        telegram_api_call("setMyCommands", {
+            "commands": BOT_COMMANDS_GROUP,
+            "scope": {"type": "all_chat_administrators"}
+        })
+
+        # 4. All private chats (regular users)
+        telegram_api_call("setMyCommands", {
+            "commands": BOT_COMMANDS_PRIVATE,
+            "scope": {"type": "all_private_chats"}
+        })
+
+        # 5. Owner private chat commands
+        owner_id = get_owner_id()
+        if owner_id:
+            register_user_commands(owner_id, role="owner")
+
+        # 6. Configured sudo admins private chat commands
+        for admin_id in get_admin_ids():
+            if admin_id and admin_id != owner_id:
+                register_user_commands(admin_id, role="admin")
+
+        # 7. Explicitly set chat menu button to show commands list
+        telegram_api_call("setChatMenuButton", {
+            "menu_button": {"type": "commands"}
+        })
+        print("[Telegram] Bot commands and chat menu button registered successfully.")
+        return True
+    except Exception as e:
+        print(f"[Telegram] Error setting up bot commands: {e}", file=sys.stderr)
+        return False
+
 
 def format_configuration(ctx):
     lines = ["🔧 *Configuration:*"]
@@ -850,8 +976,10 @@ def telegram_polling():
         time.sleep(2)
 
     if res and res.get("ok"):
-        bot_user = res["result"]["username"]
-        print(f"[Telegram] Connected as @{bot_user}")
+        global BOT_USERNAME
+        BOT_USERNAME = res["result"].get("username")
+        print(f"[Telegram] Connected as @{BOT_USERNAME}")
+        setup_bot_commands()
         send_startup_message()
     else:
         print("[Telegram] Failed to connect. Token might be missing or invalid.", file=sys.stderr)
@@ -882,7 +1010,14 @@ def handle_telegram_message(msg):
     user_id = sender.get("id") or chat_id
     
     parts = text.split()
-    cmd = parts[0].split('@')[0].lower()
+    first_word = parts[0]
+    if '@' in first_word:
+        cmd_part, bot_target = first_word.split('@', 1)
+        if BOT_USERNAME and bot_target.lower() != BOT_USERNAME.lower():
+            return
+        cmd = cmd_part.lower()
+    else:
+        cmd = first_word.lower()
     
     if cmd == "/start":
         welcome = (
@@ -979,7 +1114,8 @@ def handle_telegram_message(msg):
             f"• `/shutdown` — Safely shut down the server.\n"
             f"• `/reboot` — Reboot the server.\n"
             f"• `/restart` — Restart the bot service.\n"
-            f"• `/sudolist` — List configured sudo admins.\n\n"
+            f"• `/sudolist` — List configured sudo admins.\n"
+            f"• `/synccommands` — Refresh Telegram command autocomplete list.\n\n"
             f"👑 *Owner Commands:*\n"
             f"• `/addsudo <user_id>` — Add a user to sudo admins.\n"
             f"• `/delsudo <user_id>` — Remove a user from sudo admins.\n"
@@ -1022,6 +1158,7 @@ def handle_telegram_message(msg):
             CONFIG["admin_ids"] = []
         CONFIG["admin_ids"].append(target_id)
         save_config(CONFIG)
+        register_user_commands(target_id, role="admin")
         send_message(chat_id, f"✅ *Success:* User `{target_id}` has been added as a sudo admin.")
 
     elif cmd in ("/delsudo", "/rmsudo"):
@@ -1051,6 +1188,7 @@ def handle_telegram_message(msg):
         if "admins" in CONFIG and isinstance(CONFIG["admins"], list):
             CONFIG["admins"] = [a for a in CONFIG["admins"] if a != target_id and str(a) != str(target_id)]
         save_config(CONFIG)
+        unregister_user_commands(target_id)
         send_message(chat_id, f"✅ *Success:* User `{target_id}` removed from sudo admins.")
 
     elif cmd in ("/sudolist", "/admins"):
@@ -1096,6 +1234,17 @@ def handle_telegram_message(msg):
 
         send_message(chat_id, "🔄 *Restarting bot service now...*")
         threading.Timer(1.5, _do_restart, args=[chat_id]).start()
+
+    elif cmd in ("/synccommands", "/updatecommands"):
+        if not is_sudo(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
+            return
+
+        ok = setup_bot_commands()
+        if ok:
+            send_message(chat_id, "✅ *Command previews synchronized successfully with Telegram!*")
+        else:
+            send_message(chat_id, "❌ *Failed to synchronize commands with Telegram.* Check daemon logs.")
 
 # Detect the newest ROM zip and matching OTA JSON across various ROM naming conventions
 def parse_filename_epoch(filename, ref_year=None):

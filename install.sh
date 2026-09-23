@@ -57,7 +57,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$BOT_DIR
-ExecStart=/usr/bin/python3 $BOT_DIR/daemon.py
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -u $BOT_DIR/daemon.py
 Restart=always
 RestartSec=10
 
@@ -113,9 +114,21 @@ echo "3️⃣  Activate your Telegram Chat/Channel:"
 echo "    Add your bot to your groups/channels or start a private chat."
 echo "    Send the command '/subscribe' inside the chat to register it for alerts."
 echo ""
-echo "4️⃣  Activate Terminal Commands Tracking:"
-echo "    Add the following line to the END of your ~/.bashrc or ~/.zshrc:"
-echo "      source $BOT_DIR/tg_hooks.sh"
-echo "    Then reload your terminal: 'source ~/.bashrc'"
+echo "4️⃣  Activate Terminal Commands & Script Tracking:"
+echo "    To track builds from interactive terminals (m, mka, make) and scripts (rom-build.sh, etc.):"
+echo ""
+echo "    ▶ Add to ~/.bashrc (or ~/.zshrc):"
+echo "        export BASH_ENV=\"$BOT_DIR/tg_hooks.sh\""
+echo "        source \"$BOT_DIR/tg_hooks.sh\""
+echo ""
+echo "    ▶ Add to ~/.profile (ensures BASH_ENV is active for all login/SSH shell scripts):"
+echo "        export BASH_ENV=\"$BOT_DIR/tg_hooks.sh\""
+echo ""
+echo "    💡 Quick Setup One-Liner:"
+echo "        echo 'export BASH_ENV=\"$BOT_DIR/tg_hooks.sh\"' >> ~/.bashrc"
+echo "        echo 'source \"$BOT_DIR/tg_hooks.sh\"' >> ~/.bashrc"
+echo "        echo 'export BASH_ENV=\"$BOT_DIR/tg_hooks.sh\"' >> ~/.profile"
+echo ""
+echo "    Then reload your active shell: 'source ~/.bashrc'"
 echo ""
 echo "--------------------------------------------------"

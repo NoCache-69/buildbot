@@ -86,11 +86,27 @@ If systemd is not available on your environment, start the bot in the background
 3. Send the command **`/subscribe`** in the chat.
    > ℹ️ *The bot will now register this chat and broadcast ROM compilation updates here.*
 
-### 6️⃣ Load Shell Aliases
-Activate terminal build tracking by appending the hooks to your terminal shell. Add the following line to the end of your `~/.bashrc` (or `~/.zshrc`):
+### 6️⃣ Load Shell Aliases & Script Hooks
+To track builds executed directly in interactive terminals (`m`, `mka`, `make`) **and** builds triggered through scripts (e.g., `rom-build.sh`, `rom.sh`, or automated build scripts), configure your shell environment:
+
+#### 1. Add to `~/.bashrc` (or `~/.zshrc`):
 ```bash
+export BASH_ENV="/home/nocache/bot/tg_hooks.sh"
 source /home/nocache/bot/tg_hooks.sh
 ```
+
+#### 2. Add to `~/.profile` (ensures `BASH_ENV` is active across all login/SSH shell sessions):
+```bash
+export BASH_ENV="/home/nocache/bot/tg_hooks.sh"
+```
+
+#### 💡 Quick Setup One-Liner:
+```bash
+echo 'export BASH_ENV="$HOME/bot/tg_hooks.sh"' >> ~/.bashrc
+echo 'source "$HOME/bot/tg_hooks.sh"' >> ~/.bashrc
+echo 'export BASH_ENV="$HOME/bot/tg_hooks.sh"' >> ~/.profile
+```
+
 Reload your active terminal environment:
 ```bash
 source ~/.bashrc
@@ -123,6 +139,10 @@ The bot features a 3-tier role-based permission system:
 | **`/reboot`** | Reboots the server via `sudo reboot`. |
 | **`/restart`** | Restarts the bot background service (via `systemctl --user restart tg-build-bot.service`). |
 | **`/sudolist`** | Lists the bot owner and all registered sudo admins (alias: `/admins`). |
+| **`/synccommands`** | Forces synchronization of command previews and menu buttons with Telegram API. |
+
+> 💡 **Command Previews & Autocomplete**:
+> The bot automatically configures Telegram command previews (`setMyCommands`) across private chats, groups, and admin scopes. When any user types `/` in private chat or in a group where the bot is added, Telegram will immediately display interactive command suggestions with full descriptions.
 
 ### 👑 Owner Commands (Owner Only)
 | Command | Action |

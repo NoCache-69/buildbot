@@ -1,14 +1,24 @@
 # AOSP Build Tracking Shell Hooks
 # Add "source /path/to/tg_hooks.sh" to your ~/.bashrc or ~/.zshrc
 
+# Guard against multiple wrapping within the same build subshell
+if [ "${_TG_IN_WRAPPER:-}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 # Determine directory of this script, supporting both bash and zsh
-if [ -n "$BASH_VERSION" ]; then
+if [ -n "${BASH_VERSION:-}" ]; then
     _TG_BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-elif [ -n "$ZSH_VERSION" ]; then
+elif [ -n "${ZSH_VERSION:-}" ]; then
     _TG_BOT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
 else
     _TG_BOT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-    [ -z "$_TG_BOT_DIR" ] && _TG_BOT_DIR="$HOME/bot" # fallback
+    [ -z "${_TG_BOT_DIR:-}" ] && _TG_BOT_DIR="$HOME/bot" # fallback
+fi
+
+# Ensure BASH_ENV is exported so non-interactive scripts automatically inherit and source hooks
+if [ -n "${BASH_VERSION:-}" ] && [ -n "${_TG_BOT_DIR:-}" ]; then
+    export BASH_ENV="$_TG_BOT_DIR/tg_hooks.sh"
 fi
 
 _tg_print_build_status() {
@@ -58,25 +68,25 @@ _tg_run_build() {
     [ -z "$TOP" ] && TOP=$(pwd)
 
     # 2. Capture target device
-    local device=$TARGET_DEVICE
-    [ -z "$device" ] && device=$TARGET_PRODUCT
+    local device="${TARGET_DEVICE:-}"
+    [ -z "$device" ] && device="${TARGET_PRODUCT:-}"
     [ -z "$device" ] && device="AOSP Device"
 
     # 3. Capture build variant & release
-    local variant=$TARGET_BUILD_VARIANT
+    local variant="${TARGET_BUILD_VARIANT:-}"
     [ -z "$variant" ] && variant="Unknown"
-    local release=$TARGET_RELEASE
-    [ -z "$release" ] && release=$TARGET_RELEASE_CONFIG
+    local release="${TARGET_RELEASE:-}"
+    [ -z "$release" ] && release="${TARGET_RELEASE_CONFIG:-}"
     [ -z "$release" ] && release="Unknown"
 
     # 4. Capture additional AOSP environment variables
-    local platform_ver=$PLATFORM_VERSION
+    local platform_ver="${PLATFORM_VERSION:-}"
     [ -z "$platform_ver" ] && platform_ver="Unknown"
-    local target_prod=$TARGET_PRODUCT
+    local target_prod="${TARGET_PRODUCT:-}"
     [ -z "$target_prod" ] && target_prod="Unknown"
-    local target_arch=$TARGET_ARCH
+    local target_arch="${TARGET_ARCH:-}"
     [ -z "$target_arch" ] && target_arch="Unknown"
-    local build_id=$BUILD_ID
+    local build_id="${BUILD_ID:-}"
     [ -z "$build_id" ] && build_id="Unknown"
 
     local cmd="${build_type} $*"
@@ -118,6 +128,9 @@ _tg_run_build() {
 
     _tg_print_build_status "$exit_code" "$start_time"
 
+    # Re-export m="" in case envsetup.sh is sourced again before another build step
+    export m=""
+
     return $exit_code
 }
 
@@ -129,7 +142,7 @@ _tg_m_wrapper() {
 
 _tg_mka_wrapper() {
     local jobs=$(nproc)
-    if [ "$USE_RBE" = "1" ]; then
+    if [ "${USE_RBE:-}" = "1" ]; then
         jobs=${NINJA_REMOTE_NUM_JOBS:-2000}
     fi
     _tg_run_build "mka" "-j${jobs}" "$@"
@@ -140,13 +153,20 @@ _tg_make_wrapper() {
 }
 
 # Export the wrapper functions so they are available in subshells
-if [ -n "$BASH_VERSION" ]; then
+if [ -n "${BASH_VERSION:-}" ]; then
     export -f _tg_print_build_status
     export -f _tg_run_build
     export -f _tg_m_wrapper
     export -f _tg_mka_wrapper
     export -f _tg_make_wrapper
 fi
+
+# In modern AOSP (Android 14+), build/envsetup.sh explicitly executes `unset m`.
+# In bash, `unset m` without flags unsets the variable `m` if one exists,
+# leaving any function `m` intact!
+# By exporting an environment variable `m=""`, `unset m` in envsetup.sh consumes
+# the variable, allowing our function `m()` to survive and intercept script builds.
+export m=""
 
 # Define fallback functions for non-interactive scripts
 m() {
@@ -156,7 +176,7 @@ mka() {
     _tg_mka_wrapper "$@"
 }
 make() {
-    if [ "$_TG_IN_WRAPPER" = "1" ]; then
+    if [ "${_TG_IN_WRAPPER:-}" = "1" ]; then
         command make "$@"
     else
         _tg_make_wrapper "$@"
@@ -164,7 +184,7 @@ make() {
 }
 
 # Export fallback functions for scripts
-if [ -n "$BASH_VERSION" ]; then
+if [ -n "${BASH_VERSION:-}" ]; then
     export -f m
     export -f mka
     export -f make
