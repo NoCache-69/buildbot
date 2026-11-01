@@ -9,12 +9,22 @@ import socket
 import http.client
 import urllib.request
 import urllib.error
+import urllib.parse
+import base64
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
 import datetime
 import platform
+
+try:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
 
 # Configuration path
 def get_config_path():
@@ -36,7 +46,8 @@ def load_config():
         "owner_id": None,
         "admin_ids": [],
         "subscribed_chats": [],
-        "port": DEFAULT_PORT
+        "port": DEFAULT_PORT,
+        "upload_host": "gofile"
     }
     if not os.path.exists(CONFIG_PATH):
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -51,6 +62,8 @@ def load_config():
                 cfg["owner_id"] = None
             if "admin_ids" not in cfg and "admins" not in cfg:
                 cfg["admin_ids"] = []
+            if "upload_host" not in cfg:
+                cfg["upload_host"] = "gofile"
             return cfg
     except Exception as e:
         print(f"Error reading config: {e}", file=sys.stderr)
@@ -108,12 +121,403 @@ def get_user_role(user_id, cfg=None):
     else:
         return "user"
 
-def upload_to_gofile(file_path):
+# --- Auto-Upload Subsystem (Gofile, PixelDrain, Google Drive) ---
+
+GDRIVE_TOKEN_CACHE = {
+    "token": None,
+    "expires_at": 0
+}
+GDRIVE_TOKEN_LOCK = threading.Lock()
+
+def normalize_upload_host(val):
+    if not val:
+        return "gofile"
+    clean = str(val).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
+    if clean in ("gofile", "go"):
+        return "gofile"
+    elif clean in ("pixeldrain", "pixel", "pd"):
+        return "pixeldrain"
+    elif clean in ("gdrive", "googledrive", "drive", "google"):
+        return "gdrive"
+    elif clean in ("none", "disable", "disabled", "off", "no"):
+        return "none"
+    return clean
+
+def get_upload_host_display(host_key):
+    norm = normalize_upload_host(host_key)
+    if norm == "gofile":
+        return "Gofile"
+    elif norm == "pixeldrain":
+        return "PixelDrain"
+    elif norm == "gdrive":
+        return "Google Drive"
+    elif norm == "none":
+        return "Disabled"
+    return str(host_key).capitalize()
+
+def get_pixeldrain_api_key(cfg=None):
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    api_key = c.get("pixeldrain_api_key")
+    if not api_key and isinstance(c.get("pixeldrain"), dict):
+        api_key = c["pixeldrain"].get("api_key")
+    return api_key
+
+def find_service_account_path(cfg=None):
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    explicit_sa = c.get("gdrive_service_account")
+    if not explicit_sa and isinstance(c.get("gdrive"), dict):
+        explicit_sa = c["gdrive"].get("service_account")
+    if explicit_sa:
+        exp = os.path.expanduser(explicit_sa)
+        if os.path.exists(exp):
+            return exp
+
+    candidates = [
+        os.path.expanduser("~/.config/tg_build_bot/service_account.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_account.json"),
+        os.path.expanduser("~/.config/tg_build_bot/credentials.json")
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            return cand
+    return None
+
+def find_token_pickle_path(cfg=None):
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    explicit_pickle = c.get("gdrive_token_pickle")
+    if not explicit_pickle and isinstance(c.get("gdrive"), dict):
+        explicit_pickle = c["gdrive"].get("token_pickle")
+    if explicit_pickle:
+        exp = os.path.expanduser(explicit_pickle)
+        if os.path.exists(exp):
+            return exp
+
+    candidates = [
+        os.path.expanduser("~/.config/tg_build_bot/token.pickle"),
+        os.path.expanduser("~/creds/token.pickle"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.pickle")
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            return cand
+    return None
+
+def load_credentials_from_pickle(pickle_path):
+    if not pickle_path or not os.path.exists(pickle_path):
+        return None
+    import pickle, types
+    m_google = types.ModuleType('google')
+    m_oauth2 = types.ModuleType('google.oauth2')
+    m_creds = types.ModuleType('google.oauth2.credentials')
+
+    class DummyCreds:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __setstate__(self, state):
+            self.__dict__.update(state)
+
+    m_creds.Credentials = DummyCreds
+    saved_modules = {
+        'google': sys.modules.get('google'),
+        'google.oauth2': sys.modules.get('google.oauth2'),
+        'google.oauth2.credentials': sys.modules.get('google.oauth2.credentials')
+    }
+    sys.modules['google'] = m_google
+    sys.modules['google.oauth2'] = m_oauth2
+    sys.modules['google.oauth2.credentials'] = m_creds
+    try:
+        with open(pickle_path, 'rb') as f:
+            obj = pickle.load(f)
+        cid = getattr(obj, '_client_id', None) or getattr(obj, 'client_id', None)
+        csec = getattr(obj, '_client_secret', None) or getattr(obj, 'client_secret', None)
+        rtok = getattr(obj, '_refresh_token', None) or getattr(obj, 'refresh_token', None)
+        cur_tok = getattr(obj, 'token', None)
+        turi = getattr(obj, '_token_uri', None) or getattr(obj, 'token_uri', None) or 'https://oauth2.googleapis.com/token'
+        return {
+            "client_id": cid,
+            "client_secret": csec,
+            "refresh_token": rtok,
+            "token": cur_tok,
+            "token_uri": turi
+        }
+    except Exception as e:
+        print(f"[GDrive] Failed to unpickle {pickle_path}: {e}", file=sys.stderr)
+        return None
+    finally:
+        for mod_name, mod_val in saved_modules.items():
+            if mod_val is not None:
+                sys.modules[mod_name] = mod_val
+            else:
+                sys.modules.pop(mod_name, None)
+
+def get_gdrive_auth_info(cfg=None):
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    rclone_remote = c.get("gdrive_rclone_remote") or c.get("rclone_remote")
+    if not rclone_remote and isinstance(c.get("gdrive"), dict):
+        rclone_remote = c["gdrive"].get("rclone_remote")
+    if rclone_remote and shutil.which("rclone"):
+        folder = c.get("gdrive_folder") or (c["gdrive"].get("folder") if isinstance(c.get("gdrive"), dict) else None)
+        return {"method": f"Rclone Remote (`{rclone_remote}`)", "status": "configured", "folder_id": folder}
+
+    pickle_path = find_token_pickle_path(c)
+    if pickle_path and os.path.exists(pickle_path):
+        folder_id = c.get("gdrive_folder_id") or (c["gdrive"].get("folder_id") if isinstance(c.get("gdrive"), dict) else None)
+        return {"method": f"OAuth2 Token Pickle (`{os.path.basename(pickle_path)}`)", "status": "configured", "folder_id": folder_id}
+
+    sa_path = find_service_account_path(c)
+    if sa_path and os.path.exists(sa_path):
+        folder_id = c.get("gdrive_folder_id") or (c["gdrive"].get("folder_id") if isinstance(c.get("gdrive"), dict) else None)
+        return {"method": f"Service Account (`{os.path.basename(sa_path)}`)", "status": "configured", "folder_id": folder_id}
+
+    client_id = c.get("gdrive_client_id") or (c["gdrive"].get("client_id") if isinstance(c.get("gdrive"), dict) else None)
+    refresh_token = c.get("gdrive_refresh_token") or (c["gdrive"].get("refresh_token") if isinstance(c.get("gdrive"), dict) else None)
+    if client_id and refresh_token:
+        folder_id = c.get("gdrive_folder_id") or (c["gdrive"].get("folder_id") if isinstance(c.get("gdrive"), dict) else None)
+        return {"method": "OAuth2 Refresh Token", "status": "configured", "folder_id": folder_id}
+
+    access_token = c.get("gdrive_access_token") or (c["gdrive"].get("access_token") if isinstance(c.get("gdrive"), dict) else None)
+    if access_token:
+        folder_id = c.get("gdrive_folder_id") or (c["gdrive"].get("folder_id") if isinstance(c.get("gdrive"), dict) else None)
+        return {"method": "Direct Access Token", "status": "configured", "folder_id": folder_id}
+
+    return {"method": "_None Detected_", "status": "missing", "folder_id": None}
+
+def create_jwt_service_account(client_email, private_key_pem, scopes):
+    if not HAS_CRYPTOGRAPHY:
+        raise RuntimeError("cryptography library is not installed for RSA-SHA256 JWT signing")
+    now = int(time.time())
+    header = {"alg": "RS256", "typ": "JWT"}
+    payload = {
+        "iss": client_email,
+        "scope": " ".join(scopes) if isinstance(scopes, list) else scopes,
+        "aud": "https://oauth2.googleapis.com/token",
+        "exp": now + 3600,
+        "iat": now
+    }
+    def b64url(b):
+        return base64.urlsafe_b64encode(b).decode('utf-8').rstrip('=')
+    signing_input = (b64url(json.dumps(header).encode('utf-8')) + "." +
+                     b64url(json.dumps(payload).encode('utf-8'))).encode('utf-8')
+    key = load_pem_private_key(private_key_pem.encode('utf-8'), password=None)
+    sig = key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+    return signing_input.decode('utf-8') + "." + b64url(sig)
+
+def exchange_jwt_for_access_token(jwt_token):
+    url = "https://oauth2.googleapis.com/token"
+    post_data = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": jwt_token
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=post_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        res = json.loads(resp.read().decode('utf-8'))
+        return res.get("access_token"), res.get("expires_in", 3600)
+
+def exchange_refresh_token_for_access_token(client_id, client_secret, refresh_token):
+    url = "https://oauth2.googleapis.com/token"
+    post_data = urllib.parse.urlencode({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token"
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=post_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        res = json.loads(resp.read().decode('utf-8'))
+        return res.get("access_token"), res.get("expires_in", 3600)
+
+def get_gdrive_access_token(cfg=None):
+    global GDRIVE_TOKEN_CACHE
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    with GDRIVE_TOKEN_LOCK:
+        now = time.time()
+        if GDRIVE_TOKEN_CACHE.get("token") and GDRIVE_TOKEN_CACHE.get("expires_at", 0) > now + 60:
+            return GDRIVE_TOKEN_CACHE["token"]
+
+        # Check explicit access token first
+        direct_tok = c.get("gdrive_access_token") or (c.get("gdrive", {}).get("access_token") if isinstance(c.get("gdrive"), dict) else None)
+        if direct_tok:
+            return direct_tok
+
+        # Check token.pickle
+        pickle_path = find_token_pickle_path(c)
+        if pickle_path and os.path.exists(pickle_path):
+            pcreds = load_credentials_from_pickle(pickle_path)
+            if pcreds and pcreds.get("client_id") and pcreds.get("client_secret") and pcreds.get("refresh_token"):
+                try:
+                    token, expires_in = exchange_refresh_token_for_access_token(
+                        pcreds["client_id"],
+                        pcreds["client_secret"],
+                        pcreds["refresh_token"]
+                    )
+                    if token:
+                        GDRIVE_TOKEN_CACHE["token"] = token
+                        GDRIVE_TOKEN_CACHE["expires_at"] = now + expires_in
+                        print(f"[GDrive] Successfully refreshed OAuth access token using {pickle_path}")
+                        return token
+                except Exception as e:
+                    print(f"[GDrive] Failed to refresh token from {pickle_path}: {e}", file=sys.stderr)
+            elif pcreds and pcreds.get("token"):
+                GDRIVE_TOKEN_CACHE["token"] = pcreds["token"]
+                GDRIVE_TOKEN_CACHE["expires_at"] = now + 1800
+                return pcreds["token"]
+
+        # Check service account
+        sa_path = find_service_account_path(c)
+        if sa_path and os.path.exists(sa_path):
+            try:
+                with open(sa_path, 'r') as f:
+                    sa_data = json.load(f)
+                client_email = sa_data.get("client_email")
+                private_key = sa_data.get("private_key")
+                if client_email and private_key:
+                    jwt_assertion = create_jwt_service_account(
+                        client_email,
+                        private_key,
+                        ["https://www.googleapis.com/auth/drive"]
+                    )
+                    token, expires_in = exchange_jwt_for_access_token(jwt_assertion)
+                    if token:
+                        GDRIVE_TOKEN_CACHE["token"] = token
+                        GDRIVE_TOKEN_CACHE["expires_at"] = now + expires_in
+                        print(f"[GDrive] Successfully obtained access token using service account ({sa_path})")
+                        return token
+            except Exception as e:
+                print(f"[GDrive] Failed to authenticate with service account at {sa_path}: {e}", file=sys.stderr)
+
+        # Check OAuth2 refresh token
+        client_id = c.get("gdrive_client_id") or (c.get("gdrive", {}).get("client_id") if isinstance(c.get("gdrive"), dict) else None)
+        client_secret = c.get("gdrive_client_secret") or (c.get("gdrive", {}).get("client_secret") if isinstance(c.get("gdrive"), dict) else None)
+        refresh_token = c.get("gdrive_refresh_token") or (c.get("gdrive", {}).get("refresh_token") if isinstance(c.get("gdrive"), dict) else None)
+
+        if client_id and client_secret and refresh_token:
+            try:
+                token, expires_in = exchange_refresh_token_for_access_token(client_id, client_secret, refresh_token)
+                if token:
+                    GDRIVE_TOKEN_CACHE["token"] = token
+                    GDRIVE_TOKEN_CACHE["expires_at"] = now + expires_in
+                    print(f"[GDrive] Successfully refreshed OAuth access token")
+                    return token
+            except Exception as e:
+                print(f"[GDrive] Failed to refresh OAuth token: {e}", file=sys.stderr)
+
+        return None
+
+def gdrive_create_resumable_session(token, file_name, file_size, folder_id=None):
+    url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true"
+    metadata = {"name": file_name}
+    if folder_id:
+        metadata["parents"] = [folder_id]
+
+    payload = json.dumps(metadata).encode('utf-8')
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Type": "application/octet-stream",
+        "X-Upload-Content-Length": str(file_size)
+    }
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        location = resp.headers.get("Location")
+        if location:
+            return location
+        else:
+            print(f"[GDrive] Warning: No Location header in resumable session response: {resp.headers}", file=sys.stderr)
+            return None
+
+def gdrive_upload_chunked_curl(upload_url, file_path, token):
+    cmd = [
+        "curl", "-s", "-X", "PUT",
+        "--upload-file", file_path,
+        "-H", f"Authorization: Bearer {token}",
+        "-H", "Content-Type: application/octet-stream",
+        upload_url
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode == 0:
+        try:
+            data = json.loads(res.stdout)
+            if "id" in data:
+                return data["id"]
+            else:
+                print(f"[GDrive] Unexpected upload response: {data}", file=sys.stderr)
+        except Exception as e:
+            print(f"[GDrive] Response JSON parse error: {e} (raw: {res.stdout[:250]})", file=sys.stderr)
+    else:
+        print(f"[GDrive] Curl upload failed with code {res.returncode}: {res.stderr}", file=sys.stderr)
+    return None
+
+def gdrive_make_public(file_id, token):
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}/permissions?supportsAllDrives=true"
+    payload = json.dumps({"role": "reader", "type": "anyone"}).encode('utf-8')
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            return True
+    except Exception as e:
+        print(f"[GDrive] Note: Could not set public permission on {file_id}: {e}", file=sys.stderr)
+        return False
+
+def upload_to_gofile(file_path, cfg=None):
     if not os.path.exists(file_path):
         print(f"[Gofile] Error: file not found: {file_path}", file=sys.stderr)
         return None
-        
-    # Get server list
+
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    token = c.get("gofile_token")
+    if not token and isinstance(c.get("gofile"), dict):
+        token = c["gofile"].get("token")
+
+    folder_id = c.get("gofile_folder_id")
+    if not folder_id and isinstance(c.get("gofile"), dict):
+        folder_id = c["gofile"].get("folder_id")
+
+    fname = os.path.basename(file_path)
+    fsize = os.path.getsize(file_path)
+    print(f"[Gofile] Uploading {fname} (size: {fsize} bytes)...")
+
+    # 1. Try modern upload.gofile.io endpoint first
+    try:
+        cmd = ["curl", "-s", "-X", "POST", "https://upload.gofile.io/uploadfile", "-F", f"file=@{file_path}"]
+        if token:
+            cmd.extend(["-F", f"token={token}"])
+        if folder_id:
+            cmd.extend(["-F", f"folderId={folder_id}"])
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            try:
+                resp = json.loads(result.stdout)
+                if resp.get("status") == "ok":
+                    data = resp.get("data", {})
+                    link = data.get("downloadPage")
+                    if not link and data.get("code"):
+                        link = f"https://gofile.io/d/{data['code']}"
+                    if link:
+                        print(f"[Gofile] Uploaded {fname} successfully via upload.gofile.io: {link}")
+                        return link
+                else:
+                    print(f"[Gofile] upload.gofile.io returned error: {resp}", file=sys.stderr)
+            except Exception as parse_err:
+                print(f"[Gofile] Response parse error from upload.gofile.io: {parse_err}", file=sys.stderr)
+    except Exception as e:
+        print(f"[Gofile] Exception uploading to upload.gofile.io: {e}", file=sys.stderr)
+
+    # 2. Fallback to specific server from api.gofile.io/servers
+    print(f"[Gofile] Falling back to server pool for {fname}...", file=sys.stderr)
     servers = []
     try:
         url = "https://api.gofile.io/servers"
@@ -124,11 +528,10 @@ def upload_to_gofile(file_path):
             servers = [s["name"] for s in res_data.get("data", {}).get("servers", []) if s.get("name")]
     except Exception as e:
         print(f"[Gofile] Failed to get server list: {e}", file=sys.stderr)
-        
+
     if not servers:
-        servers = ["store1", "store5", "store8"]  # Fallbacks
-        
-    # Order servers so that the last one is tried first (to preserve original design behavior as first choice)
+        servers = ["store1", "store5", "store8"]
+
     ordered_servers = []
     if servers:
         last_srv = servers[-1]
@@ -140,35 +543,162 @@ def upload_to_gofile(file_path):
         ordered_servers = ["store1"]
 
     max_attempts = min(3, len(ordered_servers))
-    
     for attempt in range(max_attempts):
         server = ordered_servers[attempt]
-        print(f"[Gofile] Upload attempt {attempt + 1}/{max_attempts} using server: {server}")
+        print(f"[Gofile] Fallback attempt {attempt + 1}/{max_attempts} using server: {server}")
         try:
-            # Run curl in subprocess to avoid huge memory usage on python
             cmd = ["curl", "-s", "-X", "POST", f"https://{server}.gofile.io/contents/uploadfile", "-F", f"file=@{file_path}"]
+            if token:
+                cmd.extend(["-F", f"token={token}"])
+            if folder_id:
+                cmd.extend(["-F", f"folderId={folder_id}"])
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 try:
                     resp = json.loads(result.stdout)
                     if resp.get("status") == "ok":
-                        link = resp.get("data", {}).get("downloadPage")
-                        print(f"[Gofile] Uploaded {file_path} successfully: {link}")
-                        return link
-                    else:
-                        print(f"[Gofile] Upload API error for {file_path} on {server}: {resp}", file=sys.stderr)
+                        data = resp.get("data", {})
+                        link = data.get("downloadPage")
+                        if not link and data.get("code"):
+                            link = f"https://gofile.io/d/{data['code']}"
+                        if link:
+                            print(f"[Gofile] Uploaded {fname} successfully on {server}: {link}")
+                            return link
                 except Exception as parse_err:
-                    print(f"[Gofile] Response parse error on {server} (raw output: {result.stdout.strip()}): {parse_err}", file=sys.stderr)
-            else:
-                print(f"[Gofile] Curl failed for {file_path} on {server} with code {result.returncode}: {result.stderr}", file=sys.stderr)
+                    print(f"[Gofile] Response parse error on {server}: {parse_err}", file=sys.stderr)
         except Exception as e:
-            print(f"[Gofile] Exception uploading {file_path} on {server}: {e}", file=sys.stderr)
-            
+            print(f"[Gofile] Exception uploading {fname} on {server}: {e}", file=sys.stderr)
         if attempt < max_attempts - 1:
-            print(f"[Gofile] Retrying with a different server...", file=sys.stderr)
             time.sleep(2)
-        
+
     return None
+
+def upload_to_pixeldrain(file_path, cfg=None):
+    if not os.path.exists(file_path):
+        print(f"[PixelDrain] Error: file not found: {file_path}", file=sys.stderr)
+        return None
+
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    api_key = get_pixeldrain_api_key(c)
+
+    fname = os.path.basename(file_path)
+    fsize = os.path.getsize(file_path)
+    url_fname = urllib.parse.quote(fname)
+    url = f"https://pixeldrain.com/api/file/{url_fname}"
+
+    cmd = ["curl", "-s", "-T", file_path]
+    if api_key:
+        cmd.extend(["-u", f":{api_key}"])
+    cmd.append(url)
+
+    print(f"[PixelDrain] Uploading {fname} (size: {fsize} bytes)...")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            try:
+                resp = json.loads(res.stdout)
+                if resp.get("success") is True or resp.get("id"):
+                    file_id = resp.get("id")
+                    link = f"https://pixeldrain.com/api/file/{file_id}"
+                    print(f"[PixelDrain] Uploaded {fname} successfully: {link}")
+                    return link
+                else:
+                    msg = resp.get("message") or resp.get("value") or res.stdout.strip()
+                    print(f"[PixelDrain] Upload API error for {fname}: {msg}", file=sys.stderr)
+            except Exception as parse_err:
+                print(f"[PixelDrain] Response parse error: {parse_err} (raw: {res.stdout[:200]})", file=sys.stderr)
+        else:
+            print(f"[PixelDrain] Curl failed with code {res.returncode}: {res.stderr}", file=sys.stderr)
+    except Exception as e:
+        print(f"[PixelDrain] Exception uploading {fname}: {e}", file=sys.stderr)
+
+    return None
+
+def upload_to_gdrive(file_path, cfg=None):
+    if not os.path.exists(file_path):
+        print(f"[GDrive] Error: file not found: {file_path}", file=sys.stderr)
+        return None
+
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    fname = os.path.basename(file_path)
+    fsize = os.path.getsize(file_path)
+    print(f"[GDrive] Uploading {fname} (size: {fsize} bytes)...")
+
+    # 1. Check if Rclone remote is configured and rclone binary exists
+    rclone_remote = c.get("gdrive_rclone_remote") or c.get("rclone_remote")
+    if not rclone_remote and isinstance(c.get("gdrive"), dict):
+        rclone_remote = c["gdrive"].get("rclone_remote")
+
+    if rclone_remote and shutil.which("rclone"):
+        rclone_folder = c.get("gdrive_folder") or ""
+        if not rclone_folder and isinstance(c.get("gdrive"), dict):
+            rclone_folder = c["gdrive"].get("folder", "")
+
+        dest = f"{rclone_remote}:{rclone_folder}".rstrip('/')
+        if not dest.endswith(':'):
+            dest += "/"
+        print(f"[GDrive] Using Rclone to copy {fname} to {dest}...")
+        try:
+            copy_res = subprocess.run(["rclone", "copy", file_path, dest], capture_output=True, text=True)
+            if copy_res.returncode == 0:
+                file_dest = f"{dest}{fname}"
+                link_res = subprocess.run(["rclone", "link", file_dest], capture_output=True, text=True)
+                if link_res.returncode == 0 and link_res.stdout.strip().startswith("http"):
+                    link = link_res.stdout.strip()
+                    print(f"[GDrive] Uploaded {fname} successfully via Rclone: {link}")
+                    return link
+                else:
+                    print(f"[GDrive] Rclone uploaded file, but 'rclone link' was unable to generate link: {link_res.stderr.strip()}", file=sys.stderr)
+            else:
+                print(f"[GDrive] Rclone copy failed: {copy_res.stderr.strip()}", file=sys.stderr)
+        except Exception as e:
+            print(f"[GDrive] Rclone execution exception: {e}", file=sys.stderr)
+
+    # 2. Native Google Drive API upload via OAuth2/Service Account
+    token = get_gdrive_access_token(c)
+    if not token:
+        print(f"[GDrive] Upload failed: Unable to obtain Google Drive access token. Please verify service_account.json or OAuth credentials.", file=sys.stderr)
+        return None
+
+    folder_id = c.get("gdrive_folder_id")
+    if not folder_id and isinstance(c.get("gdrive"), dict):
+        folder_id = c["gdrive"].get("folder_id")
+
+    try:
+        upload_url = gdrive_create_resumable_session(token, fname, fsize, folder_id)
+        if not upload_url:
+            print(f"[GDrive] Failed to initiate resumable upload session for {fname}", file=sys.stderr)
+            return None
+
+        file_id = gdrive_upload_chunked_curl(upload_url, file_path, token)
+        if not file_id:
+            print(f"[GDrive] File binary transfer failed for {fname}", file=sys.stderr)
+            return None
+
+        gdrive_make_public(file_id, token)
+
+        link = f"https://drive.google.com/uc?id={file_id}&export=download"
+        print(f"[GDrive] Uploaded {fname} successfully to Google Drive: {link}")
+        return link
+    except Exception as e:
+        print(f"[GDrive] Exception uploading {fname}: {e}", file=sys.stderr)
+        return None
+
+def upload_file_to_host(file_path, cfg=None):
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    host = normalize_upload_host(c.get("upload_host", "gofile"))
+
+    if host == "gofile":
+        return upload_to_gofile(file_path, c)
+    elif host == "pixeldrain":
+        return upload_to_pixeldrain(file_path, c)
+    elif host == "gdrive":
+        return upload_to_gdrive(file_path, c)
+    elif host == "none":
+        return None
+    else:
+        print(f"[Upload] Unknown host '{host}', falling back to Gofile", file=sys.stderr)
+        return upload_to_gofile(file_path, c)
 
 # Global variables
 CONFIG = load_config()
@@ -365,6 +895,7 @@ BOT_COMMANDS_DEFAULT = [
     {"command": "subscribe", "description": "Subscribe this chat to live build alerts"},
     {"command": "unsubscribe", "description": "Unsubscribe this chat from build alerts"},
     {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "host", "description": "View auto-upload host and settings"},
     {"command": "ping", "description": "Check bot latency and responsiveness"},
     {"command": "help", "description": "View complete command list and guide"},
     {"command": "start", "description": "Start the bot and view welcome info"},
@@ -375,6 +906,7 @@ BOT_COMMANDS_GROUP = [
     {"command": "subscribe", "description": "Subscribe this group to live build alerts"},
     {"command": "unsubscribe", "description": "Unsubscribe this group from build alerts"},
     {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "host", "description": "View auto-upload host and settings"},
     {"command": "ping", "description": "Check bot latency and responsiveness"},
     {"command": "help", "description": "View complete command list and guide"},
     {"command": "start", "description": "View bot introduction and info"},
@@ -386,6 +918,7 @@ BOT_COMMANDS_PRIVATE = [
     {"command": "subscribe", "description": "Subscribe this chat to live build alerts"},
     {"command": "unsubscribe", "description": "Unsubscribe this chat from build alerts"},
     {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "host", "description": "View auto-upload host and settings"},
     {"command": "ping", "description": "Check bot latency and responsiveness"},
     {"command": "help", "description": "View complete command list and guide"},
 ]
@@ -396,6 +929,8 @@ BOT_COMMANDS_SUDO = [
     {"command": "subscribe", "description": "Subscribe this chat to live build alerts"},
     {"command": "unsubscribe", "description": "Unsubscribe this chat from build alerts"},
     {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
+    {"command": "host", "description": "View auto-upload host and settings"},
+    {"command": "sethost", "description": "Change auto-upload host (sudo)"},
     {"command": "ping", "description": "Check bot latency and responsiveness"},
     {"command": "help", "description": "View complete command list and guide"},
     {"command": "sudolist", "description": "List configured bot sudo admins"},
@@ -1029,6 +1564,7 @@ def handle_telegram_message(msg):
             f"• `/unsubscribe` - Remove this chat from receiving alerts.\n"
             f"• `/status` - Check current active build progress.\n"
             f"• `/specs` - View server specs (OS, Kernel, CPU, RAM, Disk).\n"
+            f"• `/host` - View auto-upload host and configuration.\n"
             f"• `/ping` - Check if the bot is alive and active.\n"
             f"• `/help` - View complete command list."
         )
@@ -1098,6 +1634,104 @@ def handle_telegram_message(msg):
             resp_str = ""
         send_message(chat_id, f"🏓 *Pong!*{resp_str}")
 
+    elif cmd == "/host":
+        c = CONFIG
+        current_host = normalize_upload_host(c.get("upload_host", "gofile"))
+        current_display = get_upload_host_display(current_host)
+
+        status_lines = []
+        status_lines.append(f"☁️ *Auto-Upload Host Configuration*")
+        status_lines.append(f"━━━━━━━━━━━━━━━━━━━━━")
+        status_lines.append(f"📍 *Active Host:* *{escape_markdown(current_display)}* (`{current_host}`)")
+
+        if current_host == "gofile":
+            token = c.get("gofile_token") or (c.get("gofile", {}).get("token") if isinstance(c.get("gofile"), dict) else None)
+            folder_id = c.get("gofile_folder_id") or (c.get("gofile", {}).get("folder_id") if isinstance(c.get("gofile"), dict) else None)
+            auth_str = "Authenticated with API Token" if token else "Anonymous Upload (No Token)"
+            status_lines.append(f"🔑 *Mode:* {auth_str}")
+            if folder_id:
+                status_lines.append(f"📁 *Folder ID:* `{escape_markdown(folder_id)}`")
+        elif current_host == "pixeldrain":
+            api_key = get_pixeldrain_api_key(c)
+            if api_key:
+                masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
+                status_lines.append(f"🔑 *API Key:* `{escape_markdown(masked_key)}` (Configured)")
+            else:
+                status_lines.append(f"⚠️ *API Key:* _Not Configured_ (PixelDrain requires `pixeldrain_api_key` in config.json)")
+        elif current_host == "gdrive":
+            gd_info = get_gdrive_auth_info(c)
+            status_lines.append(f"🔑 *Auth Method:* {gd_info['method']}")
+            if gd_info.get('folder_id'):
+                status_lines.append(f"📁 *Folder ID:* `{escape_markdown(gd_info['folder_id'])}`")
+            if gd_info.get('status') == 'missing':
+                status_lines.append(f"⚠️ *Notice:* Place `service_account.json` in `~/.config/tg_build_bot/` or configure OAuth/Rclone in config.")
+        elif current_host == "none":
+            status_lines.append(f"ℹ️ *Status:* Auto-uploading of completed ROM builds is disabled.")
+
+        status_lines.append(f"━━━━━━━━━━━━━━━━━━━━━")
+        status_lines.append(f"🌐 *Supported Hosts:*")
+        status_lines.append(f"• `gofile` — Gofile.io (Anonymous / Token)")
+        status_lines.append(f"• `pixeldrain` — PixelDrain.com (Requires API key)")
+        status_lines.append(f"• `gdrive` — Google Drive (Service Account / OAuth / Rclone)")
+        status_lines.append(f"• `none` — Disable build uploads")
+
+        if is_sudo(user_id):
+            status_lines.append(f"\n💡 *Switch Host:* `/sethost <gofile|pixeldrain|gdrive|none>`")
+
+        send_message(chat_id, "\n".join(status_lines))
+
+    elif cmd == "/sethost":
+        if not is_sudo(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
+            return
+
+        if len(parts) < 2:
+            current = get_upload_host_display(CONFIG.get("upload_host", "gofile"))
+            send_message(
+                chat_id,
+                f"ℹ️ *Usage:* `/sethost <host>`\n\n"
+                f"📍 *Current Host:* *{escape_markdown(current)}*\n\n"
+                f"Available options:\n"
+                f"• `/sethost gofile` — Set Gofile as upload host\n"
+                f"• `/sethost pixeldrain` — Set PixelDrain as upload host\n"
+                f"• `/sethost gdrive` — Set Google Drive as upload host\n"
+                f"• `/sethost none` — Disable auto-uploads"
+            )
+            return
+
+        target_host = parts[1].strip()
+        norm_host = normalize_upload_host(target_host)
+
+        valid_hosts = ("gofile", "pixeldrain", "gdrive", "none")
+        if norm_host not in valid_hosts:
+            send_message(
+                chat_id,
+                f"❌ *Invalid host:* `{escape_markdown(target_host)}`\n"
+                f"Valid options are: `gofile`, `pixeldrain`, `gdrive`, `none`"
+            )
+            return
+
+        CONFIG["upload_host"] = norm_host
+        save_config(CONFIG)
+        display_name = get_upload_host_display(norm_host)
+
+        response_msg = f"✅ *Upload host successfully changed to:* *{escape_markdown(display_name)}* (`{norm_host}`)"
+
+        if norm_host == "pixeldrain":
+            api_key = get_pixeldrain_api_key(CONFIG)
+            if not api_key:
+                response_msg += f"\n\n⚠️ *Reminder:* PixelDrain requires an API key for uploads. Please ensure `pixeldrain_api_key` is added to your `config.json`."
+        elif norm_host == "gdrive":
+            gd_info = get_gdrive_auth_info(CONFIG)
+            if gd_info.get("status") == "missing":
+                response_msg += f"\n\n⚠️ *Reminder:* Google Drive requires credentials. Place your `service_account.json` in `~/.config/tg_build_bot/` or configure OAuth/Rclone in `config.json`."
+            else:
+                response_msg += f"\n\nℹ️ *Auth Mode:* {gd_info['method']}"
+        elif norm_host == "none":
+            response_msg += f"\n\nℹ️ Output files will still be scanned and checksummed, but uploading will be skipped."
+
+        send_message(chat_id, response_msg)
+
     elif cmd == "/help":
         help_text = (
             f"📚 *Build Tracker Bot Commands*\n"
@@ -1108,9 +1742,11 @@ def handle_telegram_message(msg):
             f"• `/unsubscribe` — Unsubscribe this chat from alerts.\n"
             f"• `/status` — Show all active builds with progress.\n"
             f"• `/specs` — Show server specs (OS, Kernel, CPU, RAM, Disk).\n"
+            f"• `/host` — View current auto-upload host and settings.\n"
             f"• `/ping` — Check bot latency.\n"
             f"• `/help` — Show this command list.\n\n"
             f"🛡️ *Sudo Commands (Admin/Owner):*\n"
+            f"• `/sethost <host>` — Switch upload host (gofile, pixeldrain, gdrive, none).\n"
             f"• `/shutdown` — Safely shut down the server.\n"
             f"• `/reboot` — Reboot the server.\n"
             f"• `/restart` — Restart the bot service.\n"
@@ -1615,26 +2251,32 @@ def process_post_build(top_path, ctx, exit_code):
             })
         
         # Upload all files concurrently via thread pool
+        host_key = normalize_upload_host(CONFIG.get("upload_host", "gofile"))
+        host_name = get_upload_host_display(host_key)
         names_for_status = ", ".join(escape_html(it["name"]) for it in files_metadata)
-        current_status = (
-            f"✅ <b>Build Completed</b>\n"
-            f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
-            f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
-            f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
-            f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
-            f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
-            f"{config_block}\n\n"
-            f"📤 <b>Uploading:</b> <code>{names_for_status}</code> to Gofile..."
-        )
-        broadcast_edit(processing_msg, current_status, parse_mode="HTML")
 
-        def _upload_one(item):
-            url = upload_to_gofile(item["path"])
-            if url:
-                item["link"] = url
+        if host_key != "none":
+            current_status = (
+                f"✅ <b>Build Completed</b>\n"
+                f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+                f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+                f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+                f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+                f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
+                f"{config_block}\n\n"
+                f"📤 <b>Uploading:</b> <code>{names_for_status}</code> to {escape_html(host_name)}..."
+            )
+            broadcast_edit(processing_msg, current_status, parse_mode="HTML")
 
-        with ThreadPoolExecutor(max_workers=min(4, len(files_metadata))) as pool:
-            list(pool.map(_upload_one, files_metadata))
+            def _upload_one(item):
+                url = upload_file_to_host(item["path"], CONFIG)
+                if url:
+                    item["link"] = url
+
+            with ThreadPoolExecutor(max_workers=min(4, len(files_metadata))) as pool:
+                list(pool.map(_upload_one, files_metadata))
+        else:
+            print("[Post-Build] Auto-upload disabled in config. Skipping uploads.")
                 
         # Build files lines for collapsible quote box
         files_lines = []
@@ -1643,7 +2285,12 @@ def process_post_build(top_path, ctx, exit_code):
             type_esc = escape_html(item['type'])
             size_esc = escape_html(item['size'])
             md5_esc = escape_html(item['md5'])
-            link_html = f'<a href="{escape_html(item["link"])}">{escape_html(item["link"])}</a>' if item['link'] else "<i>Upload Failed</i>"
+            if host_key == "none":
+                link_html = "<i>Auto-upload Disabled</i>"
+            elif item['link']:
+                link_html = f'<a href="{escape_html(item["link"])}">{escape_html(item["link"])}</a>'
+            else:
+                link_html = f"<i>Upload Failed ({escape_html(host_name)})</i>"
             
             files_lines.append(f"<b>{idx}. File:</b> <code>{name_esc}</code>")
             files_lines.append(f"   Type: {type_esc} | Size: {size_esc}")
@@ -1654,6 +2301,7 @@ def process_post_build(top_path, ctx, exit_code):
                 
         files_content = "\n".join(files_lines)
         
+        section_title = f"<b>Rom Files uploaded ({escape_html(host_name)}):</b>\n" if host_key != "none" else "<b>Rom Files:</b>\n"
         success_card = (
             f"✅ <b>Build Completed</b>\n"
             f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
@@ -1663,7 +2311,7 @@ def process_post_build(top_path, ctx, exit_code):
             f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
             f"{config_block}\n\n"
             f"<blockquote expandable>\n"
-            f"<b>Rom Files uploaded:</b>\n"
+            f"{section_title}"
             f"{files_content}\n"
             f"</blockquote>"
         )
