@@ -599,7 +599,7 @@ def upload_to_pixeldrain(file_path, cfg=None):
                 resp = json.loads(res.stdout)
                 if resp.get("success") is True or resp.get("id"):
                     file_id = resp.get("id")
-                    link = f"https://pixeldrain.com/api/file/{file_id}"
+                    link = f"https://cdn.pixeldrain.eu.cc/{file_id}"
                     print(f"[PixelDrain] Uploaded {fname} successfully: {link}")
                     return link
                 else:
