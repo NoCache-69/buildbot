@@ -37,6 +37,7 @@ elif [ ! -f "$USER_CONFIG_FILE" ]; then
     "subscribed_chats": [],
     "port": 8080,
     "upload_host": "gofile",
+    "gdrive_upload": false,
     "gofile_token": null,
     "gofile_folder_id": null,
     "pixeldrain_api_key": null,

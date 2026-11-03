@@ -45,7 +45,8 @@ Open your configuration file at `~/.config/tg_build_bot/config.json` (created au
     "admin_ids": [],
     "subscribed_chats": [],
     "port": 8080,
-    "upload_host": "gofile",
+    "upload_host": "pixeldrain",
+    "gdrive_upload": false,
     "pixeldrain_api_key": null,
     "gdrive": {
         "service_account": null,
@@ -60,10 +61,14 @@ Set `"upload_host"` to any of the following:
 
 | Host | Description | Configuration Keys |
 | :--- | :--- | :--- |
-| **`"gofile"`** *(Default)* | Uploads to [Gofile.io](https://gofile.io). Works out of the box anonymously without authentication. | Optional: `"gofile_token"`, `"gofile_folder_id"` |
-| **`"pixeldrain"`** | Uploads to [PixelDrain.com](https://pixeldrain.com). Fast and reliable. | Required: `"pixeldrain_api_key"` (from your PixelDrain API keys page) |
-| **`"gdrive"`** | Uploads to Google Drive with public share links. | Supports: Service Account, OAuth2, or Rclone (see below) |
-| **`"none"`** | Disables auto-uploading. Output files will still be discovered, sized, and checksummed. | None |
+| **`"gofile"`** | Uploads to [Gofile.io](https://gofile.io). Works out of the box anonymously without authentication. | Optional: `"gofile_token"`, `"gofile_folder_id"` |
+| **`"pixeldrain"`** *(Recommended)* | Uploads to [PixelDrain.com](https://pixeldrain.com). Fast and reliable direct downloads. | Required: `"pixeldrain_api_key"` (from your PixelDrain API keys page) |
+| **`"gdrive"`** | Uploads to Google Drive with direct download links. (Note: Only `.zip` files are uploaded to GDrive). | Supports: Service Account, OAuth2, or Rclone (see below) |
+
+#### 📦 Optional Google Drive ZIP Upload (`gdrive_upload`):
+You can enable Google Drive as a **secondary optional upload host** specifically for ROM `.zip` files:
+- When enabled via `/gdrive yes` (or `"gdrive_upload": true` in `config.json`), all build artifacts (`boot.img`, `dtbo.img`, etc.) are uploaded to your primary host (e.g. PixelDrain), and the ROM `.zip` package is **also** uploaded to Google Drive!
+- Non-zip files are never uploaded to Google Drive, saving cloud storage while providing users with dual download sources for the main ROM package.
 
 > 📁 **Google Drive Configuration Methods**:
 > - **Method 1 (OAuth2 / token.pickle - Recommended)**: Place `token.pickle` in `~/.config/tg_build_bot/token.pickle` (or specify OAuth `client_id`, `client_secret`, and `refresh_token` in `config.json`).
@@ -174,16 +179,20 @@ Send **`/host`** to your Telegram bot. It will report your active host and crede
 ```
 ☁️ Auto-Upload Host Configuration
 ━━━━━━━━━━━━━━━━━━━━━
-📍 Active Host: Google Drive (gdrive)
-🔑 Auth Method: OAuth2 Token Pickle (token.pickle)
-📁 Folder ID: 1S-GX1QSvfigarRLrgsAKlwu5R5BiNqPJ
+📍 Primary Host: PixelDrain (pixeldrain)
+🔑 API Key: 315b...4dfd (Configured)
+━━━━━━━━━━━━━━━━━━━━━
+📦 Optional GDrive Upload (ZIP only): ENABLED (yes)
+🔑 GDrive Auth: OAuth2 Token Pickle (token.pickle)
+📁 GDrive Folder ID: 1S-GX1QSvfigarRLrgsAKlwu5R5BiNqPJ
 ```
 
-To switch between hosts at any time without restarting the daemon:
-- `/sethost gdrive` — Switch to Google Drive
-- `/sethost pixeldrain` — Switch to PixelDrain
-- `/sethost gofile` — Switch to Gofile
-- `/sethost none` — Disable auto-uploads
+To configure and switch upload settings live via chat commands:
+- `/sethost pixeldrain` — Switch primary host to PixelDrain
+- `/sethost gofile` — Switch primary host to Gofile
+- `/sethost gdrive` — Switch primary host to Google Drive
+- `/gdrive yes` — Enable parallel ROM `.zip` upload to Google Drive
+- `/gdrive no` — Disable parallel ROM `.zip` upload to Google Drive
 
 ### 3️⃣ Run the Installer
 Generate the systemd service file and configure file permissions by executing:
@@ -268,7 +277,8 @@ The bot features a 3-tier role-based permission system:
 ### 🛡️ Sudo Commands (Admins & Owner)
 | Command | Action |
 | :--- | :--- |
-| **`/sethost <host>`** | Changes the auto-upload host (`gofile`, `pixeldrain`, `gdrive`, `none`). |
+| **`/sethost <host>`** | Changes primary upload host (`gofile`, `pixeldrain`, `gdrive`). |
+| **`/gdrive <yes\|no>`** | Toggles optional parallel ROM `.zip` upload to Google Drive. |
 | **`/shutdown`** | Safely powers off the server via `sudo shutdown -h now`. |
 | **`/reboot`** | Reboots the server via `sudo reboot`. |
 | **`/restart`** | Restarts the bot background service (via `systemctl --user restart tg-build-bot.service`). |

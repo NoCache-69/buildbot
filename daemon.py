@@ -47,7 +47,8 @@ def load_config():
         "admin_ids": [],
         "subscribed_chats": [],
         "port": DEFAULT_PORT,
-        "upload_host": "gofile"
+        "upload_host": "gofile",
+        "gdrive_upload": False
     }
     if not os.path.exists(CONFIG_PATH):
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -62,8 +63,10 @@ def load_config():
                 cfg["owner_id"] = None
             if "admin_ids" not in cfg and "admins" not in cfg:
                 cfg["admin_ids"] = []
-            if "upload_host" not in cfg:
+            if "upload_host" not in cfg or cfg.get("upload_host") == "none":
                 cfg["upload_host"] = "gofile"
+            if "gdrive_upload" not in cfg:
+                cfg["gdrive_upload"] = False
             return cfg
     except Exception as e:
         print(f"Error reading config: {e}", file=sys.stderr)
@@ -139,8 +142,6 @@ def normalize_upload_host(val):
         return "pixeldrain"
     elif clean in ("gdrive", "googledrive", "drive", "google"):
         return "gdrive"
-    elif clean in ("none", "disable", "disabled", "off", "no"):
-        return "none"
     return clean
 
 def get_upload_host_display(host_key):
@@ -151,9 +152,16 @@ def get_upload_host_display(host_key):
         return "PixelDrain"
     elif norm == "gdrive":
         return "Google Drive"
-    elif norm == "none":
-        return "Disabled"
     return str(host_key).capitalize()
+
+def is_gdrive_upload_enabled(cfg=None):
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    val = c.get("gdrive_upload")
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes", "y", "on", "enable", "enabled")
+    return False
 
 def get_pixeldrain_api_key(cfg=None):
     c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
@@ -615,6 +623,10 @@ def upload_to_pixeldrain(file_path, cfg=None):
     return None
 
 def upload_to_gdrive(file_path, cfg=None):
+    if not file_path.lower().endswith(".zip"):
+        print(f"[GDrive] Skipping non-zip file: {os.path.basename(file_path)} (GDrive accepts ZIP only)")
+        return None
+
     if not os.path.exists(file_path):
         print(f"[GDrive] Error: file not found: {file_path}", file=sys.stderr)
         return None
@@ -694,8 +706,6 @@ def upload_file_to_host(file_path, cfg=None):
         return upload_to_pixeldrain(file_path, c)
     elif host == "gdrive":
         return upload_to_gdrive(file_path, c)
-    elif host == "none":
-        return None
     else:
         print(f"[Upload] Unknown host '{host}', falling back to Gofile", file=sys.stderr)
         return upload_to_gofile(file_path, c)
@@ -931,6 +941,7 @@ BOT_COMMANDS_SUDO = [
     {"command": "specs", "description": "View build server specs (CPU, RAM, Disk)"},
     {"command": "host", "description": "View auto-upload host and settings"},
     {"command": "sethost", "description": "Change auto-upload host (sudo)"},
+    {"command": "gdrive", "description": "Toggle optional GDrive zip upload (yes/no)"},
     {"command": "ping", "description": "Check bot latency and responsiveness"},
     {"command": "help", "description": "View complete command list and guide"},
     {"command": "sudolist", "description": "List configured bot sudo admins"},
@@ -1638,17 +1649,18 @@ def handle_telegram_message(msg):
         c = CONFIG
         current_host = normalize_upload_host(c.get("upload_host", "gofile"))
         current_display = get_upload_host_display(current_host)
+        gdrive_opt = is_gdrive_upload_enabled(c)
 
         status_lines = []
         status_lines.append(f"☁️ *Auto-Upload Host Configuration*")
         status_lines.append(f"━━━━━━━━━━━━━━━━━━━━━")
-        status_lines.append(f"📍 *Active Host:* *{escape_markdown(current_display)}* (`{current_host}`)")
+        status_lines.append(f"📍 *Primary Host:* *{escape_markdown(current_display)}* (`{current_host}`)")
 
         if current_host == "gofile":
             token = c.get("gofile_token") or (c.get("gofile", {}).get("token") if isinstance(c.get("gofile"), dict) else None)
             folder_id = c.get("gofile_folder_id") or (c.get("gofile", {}).get("folder_id") if isinstance(c.get("gofile"), dict) else None)
             auth_str = "Authenticated with API Token" if token else "Anonymous Upload (No Token)"
-            status_lines.append(f"🔑 *Mode:* {auth_str}")
+            status_lines.append(f"🔑 *Primary Auth:* {auth_str}")
             if folder_id:
                 status_lines.append(f"📁 *Folder ID:* `{escape_markdown(folder_id)}`")
         elif current_host == "pixeldrain":
@@ -1664,19 +1676,28 @@ def handle_telegram_message(msg):
             if gd_info.get('folder_id'):
                 status_lines.append(f"📁 *Folder ID:* `{escape_markdown(gd_info['folder_id'])}`")
             if gd_info.get('status') == 'missing':
-                status_lines.append(f"⚠️ *Notice:* Place `service_account.json` in `~/.config/tg_build_bot/` or configure OAuth/Rclone in config.")
-        elif current_host == "none":
-            status_lines.append(f"ℹ️ *Status:* Auto-uploading of completed ROM builds is disabled.")
+                status_lines.append(f"⚠️ *Notice:* Place `service_account.json` or `token.pickle` in `~/.config/tg_build_bot/`.")
 
         status_lines.append(f"━━━━━━━━━━━━━━━━━━━━━")
-        status_lines.append(f"🌐 *Supported Hosts:*")
+        opt_status = "ENABLED (yes)" if gdrive_opt else "DISABLED (no)"
+        status_lines.append(f"📦 *Optional GDrive Upload (ZIP only):* *{opt_status}*")
+        if gdrive_opt:
+            gd_info = get_gdrive_auth_info(c)
+            status_lines.append(f"🔑 *GDrive Auth:* {gd_info['method']}")
+            if gd_info.get('folder_id'):
+                status_lines.append(f"📁 *GDrive Folder ID:* `{escape_markdown(gd_info['folder_id'])}`")
+            if gd_info.get('status') == 'missing':
+                status_lines.append(f"⚠️ *Notice:* Place `service_account.json` or `token.pickle` in `~/.config/tg_build_bot/`.")
+
+        status_lines.append(f"━━━━━━━━━━━━━━━━━━━━━")
+        status_lines.append(f"🌐 *Supported Primary Hosts:*")
         status_lines.append(f"• `gofile` — Gofile.io (Anonymous / Token)")
         status_lines.append(f"• `pixeldrain` — PixelDrain.com (Requires API key)")
         status_lines.append(f"• `gdrive` — Google Drive (Service Account / OAuth / Rclone)")
-        status_lines.append(f"• `none` — Disable build uploads")
 
         if is_sudo(user_id):
-            status_lines.append(f"\n💡 *Switch Host:* `/sethost <gofile|pixeldrain|gdrive|none>`")
+            status_lines.append(f"\n💡 *Switch Primary Host:* `/sethost <gofile|pixeldrain|gdrive>`")
+            status_lines.append(f"💡 *Toggle GDrive ZIP Upload:* `/gdrive <yes|no>`")
 
         send_message(chat_id, "\n".join(status_lines))
 
@@ -1690,24 +1711,23 @@ def handle_telegram_message(msg):
             send_message(
                 chat_id,
                 f"ℹ️ *Usage:* `/sethost <host>`\n\n"
-                f"📍 *Current Host:* *{escape_markdown(current)}*\n\n"
+                f"📍 *Current Primary Host:* *{escape_markdown(current)}*\n\n"
                 f"Available options:\n"
                 f"• `/sethost gofile` — Set Gofile as upload host\n"
                 f"• `/sethost pixeldrain` — Set PixelDrain as upload host\n"
-                f"• `/sethost gdrive` — Set Google Drive as upload host\n"
-                f"• `/sethost none` — Disable auto-uploads"
+                f"• `/sethost gdrive` — Set Google Drive as upload host"
             )
             return
 
         target_host = parts[1].strip()
         norm_host = normalize_upload_host(target_host)
 
-        valid_hosts = ("gofile", "pixeldrain", "gdrive", "none")
+        valid_hosts = ("gofile", "pixeldrain", "gdrive")
         if norm_host not in valid_hosts:
             send_message(
                 chat_id,
                 f"❌ *Invalid host:* `{escape_markdown(target_host)}`\n"
-                f"Valid options are: `gofile`, `pixeldrain`, `gdrive`, `none`"
+                f"Valid options are: `gofile`, `pixeldrain`, `gdrive`"
             )
             return
 
@@ -1715,7 +1735,7 @@ def handle_telegram_message(msg):
         save_config(CONFIG)
         display_name = get_upload_host_display(norm_host)
 
-        response_msg = f"✅ *Upload host successfully changed to:* *{escape_markdown(display_name)}* (`{norm_host}`)"
+        response_msg = f"✅ *Primary upload host successfully changed to:* *{escape_markdown(display_name)}* (`{norm_host}`)"
 
         if norm_host == "pixeldrain":
             api_key = get_pixeldrain_api_key(CONFIG)
@@ -1724,13 +1744,71 @@ def handle_telegram_message(msg):
         elif norm_host == "gdrive":
             gd_info = get_gdrive_auth_info(CONFIG)
             if gd_info.get("status") == "missing":
-                response_msg += f"\n\n⚠️ *Reminder:* Google Drive requires credentials. Place your `service_account.json` in `~/.config/tg_build_bot/` or configure OAuth/Rclone in `config.json`."
+                response_msg += f"\n\n⚠️ *Reminder:* Google Drive requires credentials. Place your `service_account.json` or `token.pickle` in `~/.config/tg_build_bot/` or configure OAuth/Rclone in `config.json`."
             else:
                 response_msg += f"\n\nℹ️ *Auth Mode:* {gd_info['method']}"
-        elif norm_host == "none":
-            response_msg += f"\n\nℹ️ Output files will still be scanned and checksummed, but uploading will be skipped."
 
         send_message(chat_id, response_msg)
+
+    elif cmd == "/gdrive":
+        if not is_sudo(user_id):
+            send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
+            return
+
+        current_host_display = get_upload_host_display(CONFIG.get("upload_host", "gofile"))
+        if len(parts) < 2:
+            enabled = is_gdrive_upload_enabled(CONFIG)
+            status_str = "ENABLED (yes)" if enabled else "DISABLED (no)"
+            gd_info = get_gdrive_auth_info(CONFIG)
+            auth_info_str = f"\n🔑 *Auth Method:* {gd_info['method']}"
+            if gd_info.get("folder_id"):
+                auth_info_str += f"\n📁 *Target Folder ID:* `{escape_markdown(gd_info['folder_id'])}`"
+            if gd_info.get("status") == "missing":
+                auth_info_str += "\n⚠️ *Notice:* No Google Drive credentials detected (`token.pickle` or `service_account.json`)."
+
+            msg_text = (
+                f"☁️ *Optional Google Drive Upload*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📍 *Status:* *{status_str}*{auth_info_str}\n\n"
+                f"ℹ️ When enabled, ROM `.zip` packages are uploaded to Google Drive in addition to the primary host (*{escape_markdown(current_host_display)}*). Non-zip files remain exclusively on the primary host.\n\n"
+                f"💡 *Usage:*\n"
+                f"• `/gdrive yes` — Enable optional Google Drive zip uploads\n"
+                f"• `/gdrive no` — Disable optional Google Drive zip uploads"
+            )
+            send_message(chat_id, msg_text)
+            return
+
+        arg = parts[1].strip().lower()
+        if arg in ("yes", "y", "enable", "on", "true", "1"):
+            CONFIG["gdrive_upload"] = True
+            save_config(CONFIG)
+            gd_info = get_gdrive_auth_info(CONFIG)
+            notice = ""
+            if gd_info.get("status") == "missing":
+                notice = "\n\n⚠️ *Reminder:* No Google Drive credentials detected. Please ensure `token.pickle` or `service_account.json` is configured."
+            else:
+                notice = f"\n\n🔑 *Auth Mode:* {gd_info['method']}"
+                if gd_info.get("folder_id"):
+                    notice += f"\n📁 *Target Folder ID:* `{escape_markdown(gd_info['folder_id'])}`"
+            send_message(
+                chat_id,
+                f"✅ *Optional Google Drive upload ENABLED!*\n\n"
+                f"ROM `.zip` files will now be uploaded to Google Drive in addition to the primary host (*{escape_markdown(current_host_display)}*). Non-zip files (`boot.img`, etc.) will only upload to the primary host.{notice}"
+            )
+        elif arg in ("no", "n", "disable", "off", "false", "0"):
+            CONFIG["gdrive_upload"] = False
+            save_config(CONFIG)
+            send_message(
+                chat_id,
+                f"❌ *Optional Google Drive upload DISABLED.*\n\n"
+                f"ROM builds will only be uploaded to the primary host (*{escape_markdown(current_host_display)}*)."
+            )
+        else:
+            send_message(
+                chat_id,
+                f"❌ *Invalid option:* `{escape_markdown(parts[1])}`\n"
+                f"Usage: `/gdrive yes` or `/gdrive no`"
+            )
 
     elif cmd == "/help":
         help_text = (
@@ -1746,7 +1824,8 @@ def handle_telegram_message(msg):
             f"• `/ping` — Check bot latency.\n"
             f"• `/help` — Show this command list.\n\n"
             f"🛡️ *Sudo Commands (Admin/Owner):*\n"
-            f"• `/sethost <host>` — Switch upload host (gofile, pixeldrain, gdrive, none).\n"
+            f"• `/sethost <host>` — Switch primary upload host (gofile, pixeldrain, gdrive).\n"
+            f"• `/gdrive <yes|no>` — Toggle optional Google Drive ZIP upload.\n"
             f"• `/shutdown` — Safely shut down the server.\n"
             f"• `/reboot` — Reboot the server.\n"
             f"• `/restart` — Restart the bot service.\n"
@@ -2247,36 +2326,66 @@ def process_post_build(top_path, ctx, exit_code):
                 "type": ftype,
                 "size": fsize,
                 "md5": fmd5,
-                "link": ""
+                "link": "",
+                "gdrive_link": ""
             })
         
-        # Upload all files concurrently via thread pool
+        # Upload files via thread pool
         host_key = normalize_upload_host(CONFIG.get("upload_host", "gofile"))
         host_name = get_upload_host_display(host_key)
+        gdrive_opt = is_gdrive_upload_enabled(CONFIG) and host_key != "gdrive"
         names_for_status = ", ".join(escape_html(it["name"]) for it in files_metadata)
 
-        if host_key != "none":
-            current_status = (
-                f"✅ <b>Build Completed</b>\n"
-                f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
-                f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
-                f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
-                f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
-                f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
-                f"{config_block}\n\n"
-                f"📤 <b>Uploading:</b> <code>{names_for_status}</code> to {escape_html(host_name)}..."
-            )
-            broadcast_edit(processing_msg, current_status, parse_mode="HTML")
+        target_display = host_name
+        if gdrive_opt and any(it["path"].lower().endswith(".zip") for it in files_metadata):
+            target_display = f"{host_name} + Google Drive (ZIP)"
 
-            def _upload_one(item):
+        current_status = (
+            f"✅ <b>Build Completed</b>\n"
+            f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+            f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+            f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+            f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+            f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
+            f"{config_block}\n\n"
+            f"📤 <b>Uploading:</b> <code>{names_for_status}</code> to {escape_html(target_display)}..."
+        )
+        broadcast_edit(processing_msg, current_status, parse_mode="HTML")
+
+        def _upload_primary(item):
+            if host_key == "gdrive":
+                if not item["path"].lower().endswith(".zip"):
+                    item["link"] = "SKIPPED_NOT_ZIP"
+                else:
+                    url = upload_to_gdrive(item["path"], CONFIG)
+                    if url:
+                        item["link"] = url
+            else:
                 url = upload_file_to_host(item["path"], CONFIG)
                 if url:
                     item["link"] = url
 
-            with ThreadPoolExecutor(max_workers=min(4, len(files_metadata))) as pool:
-                list(pool.map(_upload_one, files_metadata))
-        else:
-            print("[Post-Build] Auto-upload disabled in config. Skipping uploads.")
+        def _upload_gdrive_secondary(item):
+            if gdrive_opt and item["path"].lower().endswith(".zip"):
+                gd_url = upload_to_gdrive(item["path"], CONFIG)
+                if gd_url:
+                    item["gdrive_link"] = gd_url
+                else:
+                    item["gdrive_link"] = "FAILED"
+
+        upload_tasks = []
+        for item in files_metadata:
+            upload_tasks.append((_upload_primary, item))
+            if gdrive_opt and item["path"].lower().endswith(".zip"):
+                upload_tasks.append((_upload_gdrive_secondary, item))
+
+        with ThreadPoolExecutor(max_workers=min(6, len(upload_tasks))) as pool:
+            futures = [pool.submit(fn, it) for fn, it in upload_tasks]
+            for f in futures:
+                try:
+                    f.result()
+                except Exception as e:
+                    print(f"[Post-Build] Upload worker error: {e}", file=sys.stderr)
                 
         # Build files lines for collapsible quote box
         files_lines = []
@@ -2285,8 +2394,9 @@ def process_post_build(top_path, ctx, exit_code):
             type_esc = escape_html(item['type'])
             size_esc = escape_html(item['size'])
             md5_esc = escape_html(item['md5'])
-            if host_key == "none":
-                link_html = "<i>Auto-upload Disabled</i>"
+
+            if item['link'] == "SKIPPED_NOT_ZIP":
+                link_html = "<i>Skipped (GDrive accepts ZIP only)</i>"
             elif item['link']:
                 link_html = f'<a href="{escape_html(item["link"])}">{escape_html(item["link"])}</a>'
             else:
@@ -2296,12 +2406,24 @@ def process_post_build(top_path, ctx, exit_code):
             files_lines.append(f"   Type: {type_esc} | Size: {size_esc}")
             files_lines.append(f"   MD5: <code>{md5_esc}</code>")
             files_lines.append(f"   Link: {link_html}")
+
+            if gdrive_opt and item["path"].lower().endswith(".zip"):
+                if item.get("gdrive_link") and item["gdrive_link"] != "FAILED":
+                    gd_link_html = f'<a href="{escape_html(item["gdrive_link"])}">{escape_html(item["gdrive_link"])}</a>'
+                    files_lines.append(f"   GDrive: {gd_link_html}")
+                else:
+                    files_lines.append(f"   GDrive: <i>Upload Failed</i>")
+
             if idx < len(files_metadata):
                 files_lines.append("") # empty line between files
                 
         files_content = "\n".join(files_lines)
         
-        section_title = f"<b>Rom Files uploaded ({escape_html(host_name)}):</b>\n" if host_key != "none" else "<b>Rom Files:</b>\n"
+        if gdrive_opt and any(it.get("gdrive_link") and it["gdrive_link"] != "FAILED" for it in files_metadata):
+            section_title = f"<b>Rom Files uploaded ({escape_html(host_name)} + GDrive):</b>\n"
+        else:
+            section_title = f"<b>Rom Files uploaded ({escape_html(host_name)}):</b>\n"
+
         success_card = (
             f"✅ <b>Build Completed</b>\n"
             f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
