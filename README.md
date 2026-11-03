@@ -279,9 +279,9 @@ The bot features a 3-tier role-based permission system:
 | :--- | :--- |
 | **`/sethost <host>`** | Changes primary upload host (`gofile`, `pixeldrain`, `gdrive`). |
 | **`/gdrive <yes\|no>`** | Toggles optional parallel ROM `.zip` upload to Google Drive. |
-| **`/shutdown`** | Safely powers off the server via `sudo shutdown -h now`. |
-| **`/reboot`** | Reboots the server via `sudo reboot`. |
-| **`/restart`** | Restarts the bot background service (via `systemctl --user restart tg-build-bot.service`). |
+| **`/shutdown`** | Safely powers off the server via `sudo shutdown -h now` (interactive Yes/No confirmation). |
+| **`/reboot`** | Reboots the server via `sudo reboot` (interactive Yes/No confirmation). |
+| **`/restart`** | Restarts the bot background service (interactive Yes/No confirmation). |
 | **`/sudolist`** | Lists the bot owner and all registered sudo admins (alias: `/admins`). |
 | **`/synccommands`** | Forces synchronization of command previews and menu buttons with Telegram API. |
 

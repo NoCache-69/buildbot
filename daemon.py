@@ -802,13 +802,25 @@ def telegram_api_call(method, params=None, timeout=30):
     print(f"[Telegram] API call error '{method}': connection failed after retries", file=sys.stderr)
     return None
 
-def send_message(chat_id, text, parse_mode="Markdown"):
+def send_message(chat_id, text, parse_mode="Markdown", reply_markup=None):
     params = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+    if reply_markup is not None:
+        params["reply_markup"] = reply_markup
     return telegram_api_call("sendMessage", params)
 
-def edit_message(chat_id, message_id, text, parse_mode="Markdown"):
+def edit_message(chat_id, message_id, text, parse_mode="Markdown", reply_markup=None):
     params = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": parse_mode}
+    if reply_markup is not None:
+        params["reply_markup"] = reply_markup
     return telegram_api_call("editMessageText", params)
+
+def answer_callback_query(callback_query_id, text=None, show_alert=False):
+    params = {"callback_query_id": callback_query_id}
+    if text:
+        params["text"] = text
+    if show_alert:
+        params["show_alert"] = show_alert
+    return telegram_api_call("answerCallbackQuery", params)
 
 def delete_message(chat_id, message_id):
     params = {"chat_id": chat_id, "message_id": message_id}
@@ -1542,9 +1554,65 @@ def telegram_polling():
                     message = update.get("message")
                     if message and message.get("text"):
                         handle_telegram_message(message)
+                    callback_query = update.get("callback_query")
+                    if callback_query:
+                        handle_callback_query(callback_query)
         except Exception as e:
             print(f"[Telegram] Polling loop exception: {e}", file=sys.stderr)
         time.sleep(0.5)
+
+def handle_callback_query(cq):
+    cq_id = cq.get("id")
+    from_user = cq.get("from") or {}
+    user_id = from_user.get("id")
+    msg = cq.get("message")
+    data = cq.get("data", "").strip()
+
+    if not msg:
+        if cq_id:
+            answer_callback_query(cq_id)
+        return
+
+    chat_id = msg["chat"]["id"]
+    message_id = msg["message_id"]
+
+    if not is_sudo(user_id):
+        answer_callback_query(cq_id, text="⚠️ Access Denied: Sudo access required.", show_alert=True)
+        return
+
+    if data == "confirm_shutdown":
+        answer_callback_query(cq_id, text="Shutting down server...")
+        edit_message(chat_id, message_id, "🛑 *Shutdown confirmed.* Server is shutting down now...", parse_mode="Markdown")
+        threading.Timer(1.5, _do_shutdown, args=[chat_id]).start()
+
+    elif data == "confirm_reboot":
+        answer_callback_query(cq_id, text="Rebooting server...")
+        edit_message(chat_id, message_id, "🔄 *Reboot confirmed.* Server is rebooting now...", parse_mode="Markdown")
+        threading.Timer(1.5, _do_reboot, args=[chat_id]).start()
+
+    elif data == "confirm_restart":
+        answer_callback_query(cq_id, text="Restarting bot service...")
+        edit_message(chat_id, message_id, "🔄 *Restart confirmed.* Bot service is restarting now...", parse_mode="Markdown")
+        threading.Timer(1.5, _do_restart, args=[chat_id]).start()
+
+    elif data == "cancel_shutdown":
+        answer_callback_query(cq_id, text="Shutdown cancelled.")
+        edit_message(chat_id, message_id, "❌ *Shutdown cancelled.* Server will remain running.", parse_mode="Markdown")
+
+    elif data == "cancel_reboot":
+        answer_callback_query(cq_id, text="Reboot cancelled.")
+        edit_message(chat_id, message_id, "❌ *Reboot cancelled.* Server will remain running.", parse_mode="Markdown")
+
+    elif data == "cancel_restart":
+        answer_callback_query(cq_id, text="Restart cancelled.")
+        edit_message(chat_id, message_id, "❌ *Restart cancelled.* Bot service will keep running.", parse_mode="Markdown")
+
+    elif data.startswith("cancel_"):
+        answer_callback_query(cq_id, text="Action cancelled.")
+        edit_message(chat_id, message_id, "❌ *Action cancelled.* Operation was aborted.", parse_mode="Markdown")
+
+    else:
+        answer_callback_query(cq_id)
 
 def handle_telegram_message(msg):
     chat_id = msg["chat"]["id"]
@@ -1931,24 +1999,66 @@ def handle_telegram_message(msg):
             send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
             return
 
-        send_message(chat_id, "🛑 *Shutting down the server now...*")
-        threading.Timer(1.5, _do_shutdown, args=[chat_id]).start()
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Yes", "callback_data": "confirm_shutdown"},
+                    {"text": "❌ No", "callback_data": "cancel_shutdown"}
+                ]
+            ]
+        }
+        send_message(
+            chat_id,
+            "⚠️ *Confirmation Required*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Are you sure you want to *shut down* the server?\n"
+            "This will immediately power off the build machine.",
+            reply_markup=keyboard
+        )
 
     elif cmd == "/reboot":
         if not is_sudo(user_id):
             send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
             return
 
-        send_message(chat_id, "🔄 *Rebooting the server now...*")
-        threading.Timer(1.5, _do_reboot, args=[chat_id]).start()
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Yes", "callback_data": "confirm_reboot"},
+                    {"text": "❌ No", "callback_data": "cancel_reboot"}
+                ]
+            ]
+        }
+        send_message(
+            chat_id,
+            "⚠️ *Confirmation Required*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Are you sure you want to *reboot* the server?\n"
+            "All active tasks will terminate and the server will restart.",
+            reply_markup=keyboard
+        )
 
     elif cmd == "/restart":
         if not is_sudo(user_id):
             send_message(chat_id, "⚠️ *Access Denied:* You do not have permission to execute this command. Sudo access required.")
             return
 
-        send_message(chat_id, "🔄 *Restarting bot service now...*")
-        threading.Timer(1.5, _do_restart, args=[chat_id]).start()
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Yes", "callback_data": "confirm_restart"},
+                    {"text": "❌ No", "callback_data": "cancel_restart"}
+                ]
+            ]
+        }
+        send_message(
+            chat_id,
+            "⚠️ *Confirmation Required*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Are you sure you want to *restart* the bot service?\n"
+            "The bot daemon will reload in a few seconds.",
+            reply_markup=keyboard
+        )
 
     elif cmd in ("/synccommands", "/updatecommands"):
         if not is_sudo(user_id):
