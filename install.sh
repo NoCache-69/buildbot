@@ -38,6 +38,7 @@ elif [ ! -f "$USER_CONFIG_FILE" ]; then
     "port": 8080,
     "upload_host": "gofile",
     "gdrive_upload": false,
+    "index_url_format": "https://elixir-mirrors.chethangowdasj1.workers.dev/1:/{filename}",
     "gofile_token": null,
     "gofile_folder_id": null,
     "pixeldrain_api_key": null,

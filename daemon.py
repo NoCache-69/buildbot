@@ -48,7 +48,8 @@ def load_config():
         "subscribed_chats": [],
         "port": DEFAULT_PORT,
         "upload_host": "gofile",
-        "gdrive_upload": False
+        "gdrive_upload": False,
+        "index_url_format": "https://elixir-mirrors.chethangowdasj1.workers.dev/1:/{filename}"
     }
     if not os.path.exists(CONFIG_PATH):
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
@@ -67,6 +68,8 @@ def load_config():
                 cfg["upload_host"] = "gofile"
             if "gdrive_upload" not in cfg:
                 cfg["gdrive_upload"] = False
+            if "index_url_format" not in cfg:
+                cfg["index_url_format"] = "https://elixir-mirrors.chethangowdasj1.workers.dev/1:/{filename}"
             return cfg
     except Exception as e:
         print(f"Error reading config: {e}", file=sys.stderr)
@@ -695,6 +698,28 @@ def upload_to_gdrive(file_path, cfg=None):
     except Exception as e:
         print(f"[GDrive] Exception uploading {fname}: {e}", file=sys.stderr)
         return None
+
+DEFAULT_INDEX_URL_FORMAT = "https://elixir-mirrors.chethangowdasj1.workers.dev/1:/{filename}"
+
+def get_index_url(filename, cfg=None):
+    if not filename:
+        return ""
+    c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
+    fmt = c.get("index_url_format") or c.get("index_url") or c.get("gdrive_index_url")
+    if not fmt and isinstance(c.get("gdrive"), dict):
+        fmt = c["gdrive"].get("index_url_format") or c["gdrive"].get("index_url")
+    if not fmt:
+        fmt = DEFAULT_INDEX_URL_FORMAT
+
+    if filename == "<filename>":
+        quoted_fname = "<filename>"
+    else:
+        quoted_fname = urllib.parse.quote(filename)
+
+    if "{filename}" in fmt:
+        return fmt.replace("{filename}", quoted_fname)
+    else:
+        return f"{fmt.rstrip('/')}/{quoted_fname}"
 
 def upload_file_to_host(file_path, cfg=None):
     c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
@@ -1745,6 +1770,8 @@ def handle_telegram_message(msg):
                 status_lines.append(f"📁 *Folder ID:* `{escape_markdown(gd_info['folder_id'])}`")
             if gd_info.get('status') == 'missing':
                 status_lines.append(f"⚠️ *Notice:* Place `service_account.json` or `token.pickle` in `~/.config/tg_build_bot/`.")
+            index_preview = get_index_url("<filename>", c)
+            status_lines.append(f"🔗 *Index Mirror:* `{escape_markdown(index_preview)}`")
 
         status_lines.append(f"━━━━━━━━━━━━━━━━━━━━━")
         opt_status = "ENABLED (yes)" if gdrive_opt else "DISABLED (no)"
@@ -1756,6 +1783,8 @@ def handle_telegram_message(msg):
                 status_lines.append(f"📁 *GDrive Folder ID:* `{escape_markdown(gd_info['folder_id'])}`")
             if gd_info.get('status') == 'missing':
                 status_lines.append(f"⚠️ *Notice:* Place `service_account.json` or `token.pickle` in `~/.config/tg_build_bot/`.")
+            index_preview = get_index_url("<filename>", c)
+            status_lines.append(f"🔗 *Index Mirror:* `{escape_markdown(index_preview)}`")
 
         status_lines.append(f"━━━━━━━━━━━━━━━━━━━━━")
         status_lines.append(f"🌐 *Supported Primary Hosts:*")
@@ -1833,6 +1862,9 @@ def handle_telegram_message(msg):
                 auth_info_str += f"\n📁 *Target Folder ID:* `{escape_markdown(gd_info['folder_id'])}`"
             if gd_info.get("status") == "missing":
                 auth_info_str += "\n⚠️ *Notice:* No Google Drive credentials detected (`token.pickle` or `service_account.json`)."
+            if enabled:
+                index_preview = get_index_url("<filename>", CONFIG)
+                auth_info_str += f"\n🔗 *Index Mirror:* `{escape_markdown(index_preview)}`"
 
             msg_text = (
                 f"☁️ *Optional Google Drive Upload*\n"
@@ -1858,10 +1890,12 @@ def handle_telegram_message(msg):
                 notice = f"\n\n🔑 *Auth Mode:* {gd_info['method']}"
                 if gd_info.get("folder_id"):
                     notice += f"\n📁 *Target Folder ID:* `{escape_markdown(gd_info['folder_id'])}`"
+            index_preview = get_index_url("<filename>", CONFIG)
             send_message(
                 chat_id,
                 f"✅ *Optional Google Drive upload ENABLED!*\n\n"
-                f"ROM `.zip` files will now be uploaded to Google Drive in addition to the primary host (*{escape_markdown(current_host_display)}*). Non-zip files (`boot.img`, etc.) will only upload to the primary host.{notice}"
+                f"ROM `.zip` files will now be uploaded to Google Drive in addition to the primary host (*{escape_markdown(current_host_display)}*). Non-zip files (`boot.img`, etc.) will only upload to the primary host.\n\n"
+                f"🔗 *Index Mirror:* `{escape_markdown(index_preview)}`{notice}"
             )
         elif arg in ("no", "n", "disable", "off", "false", "0"):
             CONFIG["gdrive_upload"] = False
@@ -2437,7 +2471,8 @@ def process_post_build(top_path, ctx, exit_code):
                 "size": fsize,
                 "md5": fmd5,
                 "link": "",
-                "gdrive_link": ""
+                "gdrive_link": "",
+                "index_link": ""
             })
         
         # Upload files via thread pool
@@ -2470,6 +2505,8 @@ def process_post_build(top_path, ctx, exit_code):
                     url = upload_to_gdrive(item["path"], CONFIG)
                     if url:
                         item["link"] = url
+                        if is_gdrive_upload_enabled(CONFIG):
+                            item["index_link"] = get_index_url(item["name"], CONFIG)
             else:
                 url = upload_file_to_host(item["path"], CONFIG)
                 if url:
@@ -2480,6 +2517,7 @@ def process_post_build(top_path, ctx, exit_code):
                 gd_url = upload_to_gdrive(item["path"], CONFIG)
                 if gd_url:
                     item["gdrive_link"] = gd_url
+                    item["index_link"] = get_index_url(item["name"], CONFIG)
                 else:
                     item["gdrive_link"] = "FAILED"
 
@@ -2516,11 +2554,17 @@ def process_post_build(top_path, ctx, exit_code):
             files_lines.append(f"   Type: {type_esc} | Size: {size_esc}")
             files_lines.append(f"   MD5: <code>{md5_esc}</code>")
             files_lines.append(f"   Link: {link_html}")
+            if host_key == "gdrive" and item.get("index_link"):
+                idx_link_html = f'<a href="{escape_html(item["index_link"])}">{escape_html(item["index_link"])}</a>'
+                files_lines.append(f"   Index: {idx_link_html}")
 
             if gdrive_opt and item["path"].lower().endswith(".zip"):
                 if item.get("gdrive_link") and item["gdrive_link"] != "FAILED":
                     gd_link_html = f'<a href="{escape_html(item["gdrive_link"])}">{escape_html(item["gdrive_link"])}</a>'
                     files_lines.append(f"   GDrive: {gd_link_html}")
+                    if item.get("index_link"):
+                        idx_link_html = f'<a href="{escape_html(item["index_link"])}">{escape_html(item["index_link"])}</a>'
+                        files_lines.append(f"   Index: {idx_link_html}")
                 else:
                     files_lines.append(f"   GDrive: <i>Upload Failed</i>")
 

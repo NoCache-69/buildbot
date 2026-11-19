@@ -69,6 +69,8 @@ Set `"upload_host"` to any of the following:
 You can enable Google Drive as a **secondary optional upload host** specifically for ROM `.zip` files:
 - When enabled via `/gdrive yes` (or `"gdrive_upload": true` in `config.json`), all build artifacts (`boot.img`, `dtbo.img`, etc.) are uploaded to your primary host (e.g. PixelDrain), and the ROM `.zip` package is **also** uploaded to Google Drive!
 - Non-zip files are never uploaded to Google Drive, saving cloud storage while providing users with dual download sources for the main ROM package.
+- When optional Google Drive upload is enabled, the notification also provides the direct Index mirror link:
+  `https://elixir-mirrors.chethangowdasj1.workers.dev/1:/{filename}` (customizable via `"index_url_format"` in `config.json`).
 
 > 📁 **Google Drive Configuration Methods**:
 > - **Method 1 (OAuth2 / token.pickle - Recommended)**: Place `token.pickle` in `~/.config/tg_build_bot/token.pickle` (or specify OAuth `client_id`, `client_secret`, and `refresh_token` in `config.json`).
