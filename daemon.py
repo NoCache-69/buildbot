@@ -625,7 +625,21 @@ def upload_to_pixeldrain(file_path, cfg=None):
 
     return None
 
-def upload_to_gdrive(file_path, cfg=None):
+def resolve_path_templates(path_str, ctx=None):
+    if not path_str:
+        return ""
+    if not ctx:
+        return path_str
+    rom = ctx.get("rom_name") or ctx.get("rom") or ""
+    dev = ctx.get("device") or ""
+    res = path_str
+    for k in ("<romfolder>", "{romfolder}", "<rom>", "{rom}", "<ROM>", "{ROM}"):
+        res = res.replace(k, rom)
+    for k in ("<device>", "{device}", "<DEVICE>", "{DEVICE}"):
+        res = res.replace(k, dev)
+    return res
+
+def upload_to_gdrive(file_path, cfg=None, ctx=None):
     if not file_path.lower().endswith(".zip"):
         print(f"[GDrive] Skipping non-zip file: {os.path.basename(file_path)} (GDrive accepts ZIP only)")
         return None
@@ -649,21 +663,25 @@ def upload_to_gdrive(file_path, cfg=None):
         if not rclone_folder and isinstance(c.get("gdrive"), dict):
             rclone_folder = c["gdrive"].get("folder", "")
 
+        rclone_folder = resolve_path_templates(rclone_folder, ctx)
+
         dest = f"{rclone_remote}:{rclone_folder}".rstrip('/')
         if not dest.endswith(':'):
             dest += "/"
         print(f"[GDrive] Using Rclone to copy {fname} to {dest}...")
         try:
-            copy_res = subprocess.run(["rclone", "copy", file_path, dest], capture_output=True, text=True)
+            copy_res = subprocess.run(["rclone", "copy", "--drive-chunk-size", "64M", file_path, dest], capture_output=True, text=True)
             if copy_res.returncode == 0:
+                print(f"[GDrive] Uploaded {fname} successfully via Rclone to {dest}")
                 file_dest = f"{dest}{fname}"
-                link_res = subprocess.run(["rclone", "link", file_dest], capture_output=True, text=True)
+                link_res = subprocess.run(["rclone", "link", file_dest], capture_output=True, text=True, timeout=10)
                 if link_res.returncode == 0 and link_res.stdout.strip().startswith("http"):
                     link = link_res.stdout.strip()
-                    print(f"[GDrive] Uploaded {fname} successfully via Rclone: {link}")
+                    print(f"[GDrive] Generated link via Rclone: {link}")
                     return link
                 else:
-                    print(f"[GDrive] Rclone uploaded file, but 'rclone link' was unable to generate link: {link_res.stderr.strip()}", file=sys.stderr)
+                    index_link = get_index_url(fname, c, ctx)
+                    return index_link or dest
             else:
                 print(f"[GDrive] Rclone copy failed: {copy_res.stderr.strip()}", file=sys.stderr)
         except Exception as e:
@@ -701,7 +719,7 @@ def upload_to_gdrive(file_path, cfg=None):
 
 DEFAULT_INDEX_URL_FORMAT = "https://elixir-mirrors.chethangowdasj1.workers.dev/1:/{filename}"
 
-def get_index_url(filename, cfg=None):
+def get_index_url(filename, cfg=None, ctx=None):
     if not filename:
         return ""
     c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
@@ -711,6 +729,8 @@ def get_index_url(filename, cfg=None):
     if not fmt:
         fmt = DEFAULT_INDEX_URL_FORMAT
 
+    fmt = resolve_path_templates(fmt, ctx)
+
     if filename == "<filename>":
         quoted_fname = "<filename>"
     else:
@@ -718,10 +738,12 @@ def get_index_url(filename, cfg=None):
 
     if "{filename}" in fmt:
         return fmt.replace("{filename}", quoted_fname)
+    elif "<filename>" in fmt:
+        return fmt.replace("<filename>", quoted_fname)
     else:
         return f"{fmt.rstrip('/')}/{quoted_fname}"
 
-def upload_file_to_host(file_path, cfg=None):
+def upload_file_to_host(file_path, cfg=None, ctx=None):
     c = cfg if cfg is not None else (CONFIG if 'CONFIG' in globals() else load_config())
     host = normalize_upload_host(c.get("upload_host", "gofile"))
 
@@ -730,7 +752,7 @@ def upload_file_to_host(file_path, cfg=None):
     elif host == "pixeldrain":
         return upload_to_pixeldrain(file_path, c)
     elif host == "gdrive":
-        return upload_to_gdrive(file_path, c)
+        return upload_to_gdrive(file_path, c, ctx)
     else:
         print(f"[Upload] Unknown host '{host}', falling back to Gofile", file=sys.stderr)
         return upload_to_gofile(file_path, c)
@@ -820,6 +842,30 @@ def telegram_api_call(method, params=None, timeout=30):
             print(f"[Telegram] Rate limited on '{method}', retrying in {retry_after}s", file=sys.stderr)
             time.sleep(retry_after)
             continue
+        if status == 400:
+            _tg_release_connection(conn)
+            try:
+                err_data = json.loads(body)
+                migrated_chat_id = err_data.get("parameters", {}).get("migrate_to_chat_id")
+                if migrated_chat_id:
+                    print(f"[Telegram] Chat migrated from {params.get('chat_id')} to {migrated_chat_id}")
+                    old_cid = params.get("chat_id")
+                    if "subscribed_chats" in CONFIG:
+                        CONFIG["subscribed_chats"] = [
+                            migrated_chat_id if c == old_cid else c
+                            for c in CONFIG["subscribed_chats"]
+                        ]
+                        if migrated_chat_id not in CONFIG["subscribed_chats"]:
+                            CONFIG["subscribed_chats"].append(migrated_chat_id)
+                        save_config(CONFIG)
+                    if params and "chat_id" in params:
+                        params["chat_id"] = migrated_chat_id
+                        data = json.dumps(params).encode('utf-8')
+                        continue
+            except Exception as e:
+                print(f"[Telegram] Migration handling error: {e}", file=sys.stderr)
+            print(f"[Telegram] API call HTTP error '{method}': {status} - {body}", file=sys.stderr)
+            return None
         _tg_release_connection(conn)
         print(f"[Telegram] API call HTTP error '{method}': {status} - {body}", file=sys.stderr)
         return None
@@ -901,13 +947,59 @@ def broadcast_document(file_path, caption=None):
     for chat_id in chats:
         send_document(chat_id, file_path, caption)
 
+def send_photo(chat_id, photo_path, caption=None, parse_mode="HTML"):
+    token = CONFIG.get("bot_token")
+    if not token or not os.path.exists(photo_path):
+        return None
+    cmd = [
+        "curl", "-s", "-X", "POST",
+        f"https://api.telegram.org/bot{token}/sendPhoto",
+        "-F", f"chat_id={chat_id}",
+        "-F", f"photo=@{photo_path}"
+    ]
+    if caption:
+        cmd += ["-F", f"caption={caption}"]
+    if parse_mode:
+        cmd += ["-F", f"parse_mode={parse_mode}"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        try:
+            return json.loads(result.stdout)
+        except Exception:
+            return None
+    return None
+
+def broadcast_photo(photo_path, caption=None, parse_mode="HTML"):
+    chats = CONFIG.get("subscribed_chats", [])
+    if not chats or not photo_path or not os.path.exists(photo_path):
+        return {}
+    sent_messages = {}
+    lock = threading.Lock()
+
+    def _send(chat_id):
+        res = send_photo(chat_id, photo_path, caption, parse_mode)
+        if res and res.get("ok"):
+            msg_id = res["result"]["message_id"]
+            with lock:
+                sent_messages[chat_id] = msg_id
+
+    with ThreadPoolExecutor(max_workers=min(4, len(chats))) as pool:
+        list(pool.map(_send, chats))
+    return sent_messages
+
+def edit_caption(chat_id, message_id, caption, parse_mode="HTML"):
+    params = {"chat_id": chat_id, "message_id": message_id, "caption": caption, "parse_mode": parse_mode}
+    return telegram_api_call("editMessageCaption", params)
+
 def broadcast_edit(messages_map, text, parse_mode="Markdown"):
     if not messages_map:
         return
 
     def _edit(item):
         chat_id, msg_id = item
-        edit_message(chat_id, msg_id, text, parse_mode)
+        res = edit_caption(chat_id, msg_id, text, parse_mode)
+        if not res or not res.get("ok"):
+            edit_message(chat_id, msg_id, text, parse_mode)
 
     with ThreadPoolExecutor(max_workers=min(4, len(messages_map))) as pool:
         list(pool.map(_edit, messages_map.items()))
@@ -2439,12 +2531,12 @@ def process_post_build(top_path, ctx, exit_code):
         if os.path.exists(init_boot_img):
             upload_queue.append(("INIT_BOOT", init_boot_img))
 
-        # recovery.img / vendor_boot.img (whichever is available)
+        # recovery.img / vendor_boot.img
         recovery_img = os.path.join(product_dir, "recovery.img")
-        vendor_boot = os.path.join(product_dir, "vendor_boot.img")
         if os.path.exists(recovery_img):
             upload_queue.append(("RECOVERY_IMG", recovery_img))
-        elif os.path.exists(vendor_boot):
+        vendor_boot = os.path.join(product_dir, "vendor_boot.img")
+        if os.path.exists(vendor_boot):
             upload_queue.append(("VENDOR_BOOT", vendor_boot))
             
         # super_empty.img
@@ -2500,24 +2592,31 @@ def process_post_build(top_path, ctx, exit_code):
         def _upload_primary(item):
             if host_key == "gdrive":
                 if not item["path"].lower().endswith(".zip"):
-                    item["link"] = "SKIPPED_NOT_ZIP"
+                    # Upload images and other non-zip files to Gofile
+                    gf_url = upload_to_gofile(item["path"], CONFIG)
+                    if gf_url:
+                        item["link"] = gf_url
+                        item["host_label"] = "Gofile"
+                    else:
+                        item["link"] = "SKIPPED_NOT_ZIP"
                 else:
-                    url = upload_to_gdrive(item["path"], CONFIG)
+                    url = upload_to_gdrive(item["path"], CONFIG, ctx)
                     if url:
                         item["link"] = url
+                        item["host_label"] = "GDrive"
                         if is_gdrive_upload_enabled(CONFIG):
-                            item["index_link"] = get_index_url(item["name"], CONFIG)
+                            item["index_link"] = get_index_url(item["name"], CONFIG, ctx)
             else:
-                url = upload_file_to_host(item["path"], CONFIG)
+                url = upload_file_to_host(item["path"], CONFIG, ctx)
                 if url:
                     item["link"] = url
 
         def _upload_gdrive_secondary(item):
             if gdrive_opt and item["path"].lower().endswith(".zip"):
-                gd_url = upload_to_gdrive(item["path"], CONFIG)
+                gd_url = upload_to_gdrive(item["path"], CONFIG, ctx)
                 if gd_url:
                     item["gdrive_link"] = gd_url
-                    item["index_link"] = get_index_url(item["name"], CONFIG)
+                    item["index_link"] = get_index_url(item["name"], CONFIG, ctx)
                 else:
                     item["gdrive_link"] = "FAILED"
 
@@ -2550,10 +2649,11 @@ def process_post_build(top_path, ctx, exit_code):
             else:
                 link_html = f"<i>Upload Failed ({escape_html(host_name)})</i>"
             
+            lbl = item.get("host_label", "Link")
             files_lines.append(f"<b>{idx}. File:</b> <code>{name_esc}</code>")
             files_lines.append(f"   Type: {type_esc} | Size: {size_esc}")
             files_lines.append(f"   MD5: <code>{md5_esc}</code>")
-            files_lines.append(f"   Link: {link_html}")
+            files_lines.append(f"   {lbl}: {link_html}")
             if host_key == "gdrive" and item.get("index_link"):
                 idx_link_html = f'<a href="{escape_html(item["index_link"])}">{escape_html(item["index_link"])}</a>'
                 files_lines.append(f"   Index: {idx_link_html}")
@@ -2573,7 +2673,10 @@ def process_post_build(top_path, ctx, exit_code):
                 
         files_content = "\n".join(files_lines)
         
-        if gdrive_opt and any(it.get("gdrive_link") and it["gdrive_link"] != "FAILED" for it in files_metadata):
+        has_gofile = any(it.get("host_label") == "Gofile" for it in files_metadata)
+        if host_key == "gdrive" and has_gofile:
+            section_title = f"<b>Rom Files uploaded (GDrive + Gofile):</b>\n"
+        elif gdrive_opt and any(it.get("gdrive_link") and it["gdrive_link"] != "FAILED" for it in files_metadata):
             section_title = f"<b>Rom Files uploaded ({escape_html(host_name)} + GDrive):</b>\n"
         else:
             section_title = f"<b>Rom Files uploaded ({escape_html(host_name)}):</b>\n"
@@ -2591,8 +2694,48 @@ def process_post_build(top_path, ctx, exit_code):
             f"{files_content}\n"
             f"</blockquote>"
         )
-        broadcast_edit(processing_msg, success_card, parse_mode="HTML")
-        broadcast_pin(processing_msg)
+        completed_banner = f"/tmp/banner_completed_{device}.png"
+        try:
+            from banner import generate_banner
+            generate_banner(
+                rom_name=rom_name,
+                device=device,
+                maintainer=ctx.get("user") or 'NoEscape.exe("");',
+                status="COMPLETED",
+                output_path=completed_banner
+            )
+        except Exception as e:
+            print(f"[Banner] Warning: could not generate completed banner: {e}", file=sys.stderr)
+            completed_banner = None
+
+        if completed_banner and os.path.exists(completed_banner):
+            if len(success_card) <= 1024:
+                final_msg = broadcast_photo(completed_banner, caption=success_card, parse_mode="HTML")
+            else:
+                short_caption = (
+                    f"✅ <b>Build Completed</b>\n"
+                    f"🕒 <b>Started:</b> <b>{start_time_esc}</b>\n\n"
+                    f"📀 <b>Rom:</b> <b>{rom_name_esc}</b>\n"
+                    f"📱 <b>Device:</b> <b>{device_esc}</b>\n"
+                    f"⏱️ <b>Elapsed:</b> <b>{duration_esc}</b>\n\n"
+                    f"🛠️ <b>Actions:</b> <b>{actions_esc}</b>\n"
+                    f"{config_block}"
+                )
+                final_msg = broadcast_photo(completed_banner, caption=short_caption, parse_mode="HTML")
+                detail_card = (
+                    f"<blockquote expandable>\n"
+                    f"{section_title}"
+                    f"{files_content}\n"
+                    f"</blockquote>"
+                )
+                broadcast_message(detail_card, parse_mode="HTML")
+            broadcast_pin(final_msg)
+        elif processing_msg:
+            broadcast_edit(processing_msg, success_card, parse_mode="HTML")
+            broadcast_pin(processing_msg)
+        else:
+            final_msg = broadcast_message(success_card, parse_mode="HTML")
+            broadcast_pin(final_msg)
         
     else:
         # Failure logic
@@ -2614,7 +2757,25 @@ def process_post_build(top_path, ctx, exit_code):
             f"📄 Check logs for details. Error log uploaded if available."
             f"{snippet_block}"
         )
-        broadcast_message(failure_card, parse_mode="HTML")
+        failed_banner = f"/tmp/banner_failed_{device}.png"
+        try:
+            from banner import generate_banner
+            generate_banner(
+                rom_name=rom_name,
+                device=device,
+                maintainer=ctx.get("user") or 'NoEscape.exe("");',
+                status="FAILED",
+                output_path=failed_banner
+            )
+        except Exception as e:
+            failed_banner = None
+
+        if failed_banner and os.path.exists(failed_banner):
+            broadcast_photo(failed_banner, caption=failure_card[:1024], parse_mode="HTML")
+            if len(failure_card) > 1024:
+                broadcast_message(failure_card[1024:], parse_mode="HTML")
+        else:
+            broadcast_message(failure_card, parse_mode="HTML")
         
         # Broadcast the existing error.log document if it exists
         error_log_path = os.path.join(top_path, "out", "error.log")
@@ -2721,7 +2882,27 @@ class APIHandler(BaseHTTPRequestHandler):
             f"{sys_info_quoted}"
         )
         
-        messages_map = broadcast_message(notify_text, parse_mode="HTML")
+        # Attempt to generate progress banner
+        banner_file = f"/tmp/banner_progress_{device}.png"
+        try:
+            from banner import generate_banner
+            generate_banner(
+                rom_name=rom_name,
+                device=device,
+                maintainer=user if user and user != "Unknown" else 'NoEscape.exe("");',
+                status="PROGRESS",
+                output_path=banner_file
+            )
+        except Exception as e:
+            print(f"[Banner] Warning: could not generate progress banner: {e}", file=sys.stderr)
+            banner_file = None
+
+        if banner_file and os.path.exists(banner_file):
+            messages_map = broadcast_photo(banner_file, caption=notify_text, parse_mode="HTML")
+            if not messages_map:
+                messages_map = broadcast_message(notify_text, parse_mode="HTML")
+        else:
+            messages_map = broadcast_message(notify_text, parse_mode="HTML")
         
         with ACTIVE_BUILDS_LOCK:
             # If there's an existing tracker for this path, clean it up first

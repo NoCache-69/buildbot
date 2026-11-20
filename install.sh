@@ -18,6 +18,13 @@ echo "📁 Setting file permissions..."
 chmod +x "$BOT_DIR/daemon.py"
 chmod +x "$BOT_DIR/cli.py"
 chmod +x "$BOT_DIR/kill.sh"
+chmod +x "$BOT_DIR/banner.py" 2>/dev/null || true
+
+# 1.1 Install Python dependencies (Pillow for banners)
+if [ -f "$BOT_DIR/requirements.txt" ]; then
+    echo "📦 Installing Python dependencies..."
+    python3 -m pip install -q -r "$BOT_DIR/requirements.txt" 2>/dev/null || pip install -q -r "$BOT_DIR/requirements.txt" 2>/dev/null || echo "⚠️ Notice: Install Pillow manually if banner generation fails: pip install Pillow"
+fi
 
 # 2. Check and initialize config.json if not present
 if [ -f "$CONFIG_FILE" ] && [ ! -f "$USER_CONFIG_FILE" ]; then

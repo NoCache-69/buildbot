@@ -1,0 +1,964 @@
+[
+  {
+    "name": "AetherOS",
+    "slug": "aetheros",
+    "org_url": "https://github.com/Project-AetherOS",
+    "org_name": "Project-AetherOS",
+    "links": [
+      "https://t.me/aetherosofficial",
+      "https://t.me/aetheroschat"
+    ],
+    "logo_file": "aetheros.png"
+  },
+  {
+    "name": "AetheriaOS",
+    "slug": "aetheriaos",
+    "org_url": "https://github.com/AetheriaOS",
+    "org_name": "AetheriaOS",
+    "links": [
+      "https://t.me/AetheriaOS_AOSP"
+    ],
+    "logo_file": "aetheriaos.png"
+  },
+  {
+    "name": "AICP",
+    "slug": "aicp",
+    "org_url": "https://github.com/AICP",
+    "org_name": "AICP",
+    "links": [
+      "https://discord.gg/nMQUVRD"
+    ],
+    "logo_file": "aicp.png"
+  },
+  {
+    "name": "Alch3myOS",
+    "slug": "alch3myos",
+    "org_url": "https://github.com/Alch3myOS",
+    "org_name": "Alch3myOS",
+    "links": [
+      "https://t.me/LibraAlch3my"
+    ],
+    "logo_file": "alch3myos.png"
+  },
+  {
+    "name": "AlphaDroid",
+    "slug": "alphadroid",
+    "org_url": "https://github.com/AlphaDroid-Project",
+    "org_name": "AlphaDroid-Project",
+    "links": [
+      "https://t.me/alphadroid_chat"
+    ],
+    "logo_file": "alphadroid.png"
+  },
+  {
+    "name": "Altair ROM",
+    "slug": "altairrom",
+    "org_url": "https://github.com/AltairROM",
+    "org_name": "AltairROM",
+    "links": [],
+    "logo_file": "altairrom.png"
+  },
+  {
+    "name": "Android Open Source Project Mirror (unofficial)",
+    "slug": "androidopensourceprojectmirrorunofficial",
+    "org_url": "https://github.com/aosp-mirror-neo",
+    "org_name": "aosp-mirror-neo",
+    "links": [],
+    "logo_file": "androidopensourceprojectmirrorunofficial.png"
+  },
+  {
+    "name": "Androidfuckery",
+    "slug": "androidfuckery",
+    "org_url": "https://github.com/androidfuckery",
+    "org_name": "androidfuckery",
+    "links": [],
+    "logo_file": "androidfuckery.png"
+  },
+  {
+    "name": "aospa-shadedark",
+    "slug": "aospashadedark",
+    "org_url": "https://github.com/aospa-shadedark",
+    "org_name": "aospa-shadedark",
+    "links": [],
+    "logo_file": "aospashadedark.png"
+  },
+  {
+    "name": "AquariumUI",
+    "slug": "aquariumui",
+    "org_url": "https://github.com/AquariumUI",
+    "org_name": "AquariumUI",
+    "links": [],
+    "logo_file": "aquariumui.png"
+  },
+  {
+    "name": "AresOS",
+    "slug": "aresos",
+    "org_url": "https://github.com/AresOS-AOSP",
+    "org_name": "AresOS-AOSP",
+    "links": [],
+    "logo_file": "aresos.png"
+  },
+  {
+    "name": "ASCP",
+    "slug": "ascp",
+    "org_url": "https://github.com/Pixelify-AOSP",
+    "org_name": "Pixelify-AOSP",
+    "links": [
+      "https://t.me/ascp_marble",
+      "https://t.me/ascpos_marble"
+    ],
+    "logo_file": "ascp.png"
+  },
+  {
+    "name": "ASCP OSS",
+    "slug": "ascposs",
+    "org_url": "https://github.com/ascp-oss",
+    "org_name": "ascp-oss",
+    "links": [],
+    "logo_file": "ascposs.png"
+  },
+  {
+    "name": "AstralOS Project",
+    "slug": "astralosproject",
+    "org_url": "https://github.com/AstralOSProject",
+    "org_name": "AstralOSProject",
+    "links": [
+      "https://discord.gg/WCUbsQx3kE"
+    ],
+    "logo_file": "astralosproject.png"
+  },
+  {
+    "name": "AviumUI",
+    "slug": "aviumui",
+    "org_url": "https://github.com/AviumUI",
+    "org_name": "AviumUI",
+    "links": [
+      "https://t.me/aviumuichat",
+      "https://t.me/avium_update",
+      "https://t.me/AviumUI"
+    ],
+    "logo_file": "aviumui.png"
+  },
+  {
+    "name": "AxionAOSP",
+    "slug": "axionaosp",
+    "org_url": "https://github.com/AxionAOSP",
+    "org_name": "AxionAOSP",
+    "links": [
+      "https://t.me/AxionOS_android_chat",
+      "https://t.me/AxionOS_android",
+      "https://t.me/AxionOS_android_builders"
+    ],
+    "logo_file": "axionaosp.png"
+  },
+  {
+    "name": "AyakaUI",
+    "slug": "ayakaui",
+    "org_url": "https://github.com/AyakaUI",
+    "org_name": "AyakaUI",
+    "links": [
+      "https://t.me/AyakaUIChat",
+      "https://t.me/AyakaUI"
+    ],
+    "logo_file": "ayakaui.png"
+  },
+  {
+    "name": "BaikalOS",
+    "slug": "baikalos",
+    "org_url": "https://github.com/baikalos",
+    "org_name": "baikalos",
+    "links": [],
+    "logo_file": "baikalos.png"
+  },
+  {
+    "name": "BenzeneOS",
+    "slug": "benzeneos",
+    "org_url": "https://github.com/BenzeneOS",
+    "org_name": "BenzeneOS",
+    "links": [],
+    "logo_file": "benzeneos.png"
+  },
+  {
+    "name": "BlissROMs",
+    "slug": "blissroms",
+    "org_url": "https://github.com/BlissRoms",
+    "org_name": "BlissRoms",
+    "links": [
+      "https://t.me/Team_Bliss_Community",
+      "https://t.me/BlissROM_Updates"
+    ],
+    "logo_file": "blissroms.png"
+  },
+  {
+    "name": "Bluenixx",
+    "slug": "bluenixx",
+    "org_url": "https://github.com/Bluenixx",
+    "org_name": "Bluenixx",
+    "links": [],
+    "logo_file": "bluenixx.png"
+  },
+  {
+    "name": "Bluestacks",
+    "slug": "bluestacks",
+    "org_url": "https://github.com/bluestacks",
+    "org_name": "bluestacks",
+    "links": [],
+    "logo_file": "bluestacks.png"
+  },
+  {
+    "name": "CaesiumOS",
+    "slug": "caesiumos",
+    "org_url": "https://github.com/CaesiumOS",
+    "org_name": "CaesiumOS",
+    "links": [
+      "https://t.me/caesiumos"
+    ],
+    "logo_file": "caesiumos.png"
+  },
+  {
+    "name": "CalyxOS",
+    "slug": "calyxos",
+    "org_url": "https://github.com/calyxos",
+    "org_name": "calyxos",
+    "links": [
+      "https://t.me/CalyxOSpublic"
+    ],
+    "logo_file": "calyxos.png"
+  },
+  {
+    "name": "chaoticOS",
+    "slug": "chaoticos",
+    "org_url": "https://github.com/chaoticOS",
+    "org_name": "chaoticOS",
+    "links": [
+      "https://t.me/rscape_chat"
+    ],
+    "logo_file": "chaoticos.png"
+  },
+  {
+    "name": "CharaROM",
+    "slug": "chararom",
+    "org_url": "https://github.com/CharaROMAndroid",
+    "org_name": "CharaROMAndroid",
+    "links": [
+      "https://t.me/bunnypaddev"
+    ],
+    "logo_file": "chararom.png"
+  },
+  {
+    "name": "CortenaOS",
+    "slug": "cortenaos",
+    "org_url": "https://github.com/cortenaos",
+    "org_name": "cortenaos",
+    "links": [
+      "https://t.me/cortenaos"
+    ],
+    "logo_file": "cortenaos.png"
+  },
+  {
+    "name": "crDroid",
+    "slug": "crdroid",
+    "org_url": "https://github.com/crdroidandroid",
+    "org_name": "crdroidandroid",
+    "links": [
+      "https://t.me/crDroidAndroid",
+      "https://t.me/crDroidUpdates"
+    ],
+    "logo_file": "crdroid.png"
+  },
+  {
+    "name": "crDroid X",
+    "slug": "crdroidx",
+    "org_url": "https://github.com/crdroidx",
+    "org_name": "crdroidx",
+    "links": [],
+    "logo_file": "crdroidx.png"
+  },
+  {
+    "name": "DarwinAOSP",
+    "slug": "darwinaosp",
+    "org_url": "https://github.com/DarwinAOSP",
+    "org_name": "DarwinAOSP",
+    "links": [],
+    "logo_file": "darwinaosp.png"
+  },
+  {
+    "name": "DayBreakOS",
+    "slug": "daybreakos",
+    "org_url": "https://github.com/Project-DayBreakOS",
+    "org_name": "Project-DayBreakOS",
+    "links": [],
+    "logo_file": "daybreakos.png"
+  },
+  {
+    "name": "DerpFest AOSP",
+    "slug": "derpfestaosp",
+    "org_url": "https://github.com/DerpFest-AOSP",
+    "org_name": "DerpFest-AOSP",
+    "links": [
+      "https://t.me/DerpFestAOSP",
+      "https://t.me/derpfestupdates"
+    ],
+    "logo_file": "derpfestaosp.png"
+  },
+  {
+    "name": "Edith-AOSP",
+    "slug": "edithaosp",
+    "org_url": "https://github.com/Edith-AOSP",
+    "org_name": "Edith-AOSP",
+    "links": [],
+    "logo_file": "edithaosp.png"
+  },
+  {
+    "name": "euclidOS",
+    "slug": "euclidos",
+    "org_url": "https://github.com/euclidOS-AOSP",
+    "org_name": "euclidOS-AOSP",
+    "links": [
+      "https://t.me/euclidoschat",
+      "https://t.me/euclidOSupdates",
+      "https://t.me/euclid_buildsupport"
+    ],
+    "logo_file": "euclidos.png"
+  },
+  {
+    "name": "EunoiaOS",
+    "slug": "eunoiaos",
+    "org_url": "https://github.com/EunoiaOS",
+    "org_name": "EunoiaOS",
+    "links": [
+      "https://t.me/EunoiaOS_chat",
+      "https://t.me/EunoiaOS"
+    ],
+    "logo_file": "eunoiaos.png"
+  },
+  {
+    "name": "Evolution X",
+    "slug": "evolutionx",
+    "org_url": "https://github.com/Evolution-X",
+    "org_name": "Evolution-X",
+    "links": [
+      "https://discord.gg/Evolution-X",
+      "https://t.me/EvolutionXOfficialROM",
+      "https://t.me/EvolutionXOfficial",
+      "https://t.me/EvolutionXUpdates"
+    ],
+    "logo_file": "evolutionx.png"
+  },
+  {
+    "name": "FeatherOS",
+    "slug": "featheros",
+    "org_url": "https://github.com/TheFeatherOS",
+    "org_name": "TheFeatherOS",
+    "links": [
+      "https://t.me/FeatherOS"
+    ],
+    "logo_file": "featheros.png"
+  },
+  {
+    "name": "Ferrum OS",
+    "slug": "ferrumos",
+    "org_url": "https://github.com/ferrum-os",
+    "org_name": "ferrum-os",
+    "links": [],
+    "logo_file": "ferrumos.png"
+  },
+  {
+    "name": "Fluent-AOSP",
+    "slug": "fluentaosp",
+    "org_url": "https://github.com/Fluent-AOSP",
+    "org_name": "Fluent-AOSP",
+    "links": [],
+    "logo_file": "fluentaosp.png"
+  },
+  {
+    "name": "Frosty",
+    "slug": "frosty",
+    "org_url": "https://github.com/frosty-aosp",
+    "org_name": "frosty-aosp",
+    "links": [],
+    "logo_file": "frosty.png"
+  },
+  {
+    "name": "Fundamental OS",
+    "slug": "fundamentalos",
+    "org_url": "https://github.com/FundamentalOS",
+    "org_name": "FundamentalOS",
+    "links": [],
+    "logo_file": "fundamentalos.png"
+  },
+  {
+    "name": "GrapheneOS",
+    "slug": "grapheneos",
+    "org_url": "https://github.com/GrapheneOS",
+    "org_name": "GrapheneOS",
+    "links": [
+      "https://t.me/GrapheneOS"
+    ],
+    "logo_file": "grapheneos.png"
+  },
+  {
+    "name": "Good4Nothing-AOSP",
+    "slug": "good4nothingaosp",
+    "org_url": "https://github.com/Good4Nothing-AOSP",
+    "org_name": "Good4Nothing-AOSP",
+    "links": [],
+    "logo_file": "good4nothingaosp.png"
+  },
+  {
+    "name": "Halcyon",
+    "slug": "halcyon",
+    "org_url": "https://github.com/halcyonproject",
+    "org_name": "halcyonproject",
+    "links": [
+      "https://t.me/hlcynprjct",
+      "https://t.me/hlcynprjctchat"
+    ],
+    "logo_file": "halcyon.png"
+  },
+  {
+    "name": "Halcyon - Calla Lily",
+    "slug": "halcyoncallalily",
+    "org_url": "https://github.com/hlcyn-callalily",
+    "org_name": "hlcyn-callalily",
+    "links": [],
+    "logo_file": "halcyoncallalily.png"
+  },
+  {
+    "name": "halogenOS",
+    "slug": "halogenos",
+    "org_url": "https://github.com/halogenOS",
+    "org_name": "halogenOS",
+    "links": [
+      "https://t.me/halogenOS",
+      "https://discord.gg/jqEvUNWHWD",
+      "https://t.me/xos_news"
+    ],
+    "logo_file": "halogenos.png"
+  },
+  {
+    "name": "HaloUI",
+    "slug": "haloui",
+    "org_url": "https://github.com/HaloUI-AOSP",
+    "org_name": "HaloUI-AOSP",
+    "links": [],
+    "logo_file": "haloui.png"
+  },
+  {
+    "name": "HertzifyOS",
+    "slug": "hertzifyos",
+    "org_url": "https://github.com/HertzifyOS",
+    "org_name": "HertzifyOS",
+    "links": [
+      "https://t.me/HertzifyOS"
+    ],
+    "logo_file": "hertzifyos.png"
+  },
+  {
+    "name": "IchthysOS",
+    "slug": "ichthysos",
+    "org_url": "https://github.com/kusti420/IchthysOS",
+    "org_name": "kusti420",
+    "links": [],
+    "logo_file": "ichthysos.png"
+  },
+  {
+    "name": "KleeUI",
+    "slug": "kleeui",
+    "org_url": "https://github.com/KleeUI",
+    "org_name": "KleeUI",
+    "links": [],
+    "logo_file": "kleeui.png"
+  },
+  {
+    "name": "LightningOS AOSP",
+    "slug": "lightningosaosp",
+    "org_url": "https://github.com/LightningOS-AOSP",
+    "org_name": "LightningOS-AOSP",
+    "links": [],
+    "logo_file": "lightningosaosp.png"
+  },
+  {
+    "name": "LineageOS",
+    "slug": "lineageos",
+    "org_url": "https://github.com/LineageOS",
+    "org_name": "LineageOS",
+    "links": [
+      "https://t.me/Lineageos_group",
+      "https://t.me/LineageOS_Global"
+    ],
+    "logo_file": "lineageos.png"
+  },
+  {
+    "name": "LineageOS x CLO",
+    "slug": "lineageosxclo",
+    "org_url": "https://github.com/LineageOS-x-CLO",
+    "org_name": "LineageOS-x-CLO",
+    "links": [],
+    "logo_file": "lineageosxclo.png"
+  },
+  {
+    "name": "LineageOS-Ext",
+    "slug": "lineageosext",
+    "org_url": "https://github.com/Los-Ext",
+    "org_name": "Los-Ext",
+    "links": [],
+    "logo_file": "lineageosext.png"
+  },
+  {
+    "name": "LMODroid (LibreMobileOS)",
+    "slug": "lmodroidlibremobileos",
+    "org_url": "https://github.com/LMODroid",
+    "org_name": "LMODroid",
+    "links": [
+      "https://t.me/LMODroid_Discussion",
+      "https://t.me/LMODroid_Updates"
+    ],
+    "logo_file": "lmodroidlibremobileos.png"
+  },
+  {
+    "name": "LOS Modified",
+    "slug": "losmodified",
+    "org_url": "https://github.com/LOSModified",
+    "org_name": "LOSModified",
+    "links": [],
+    "logo_file": "losmodified.png"
+  },
+  {
+    "name": "LumineDroid",
+    "slug": "luminedroid",
+    "org_url": "https://github.com/LumineDroid",
+    "org_name": "LumineDroid",
+    "links": [
+      "https://t.me/LumineDroidChat",
+      "https://t.me/LumineDroidNews"
+    ],
+    "logo_file": "luminedroid.png"
+  },
+  {
+    "name": "Lunaris-AOSP",
+    "slug": "lunarisaosp",
+    "org_url": "https://github.com/Lunaris-AOSP",
+    "org_name": "Lunaris-AOSP",
+    "links": [
+      "https://t.me/lunaris_hub",
+      "https://t.me/lunaris_update",
+      "https://t.me/lunaris_dailyUP"
+    ],
+    "logo_file": "lunarisaosp.png"
+  },
+  {
+    "name": "Miku UI",
+    "slug": "mikuui",
+    "org_url": "https://github.com/Miku-UI",
+    "org_name": "Miku-UI",
+    "links": [
+      "https://t.me/mikuuirelease"
+    ],
+    "logo_file": "mikuui.png"
+  },
+  {
+    "name": "MIRACLO",
+    "slug": "miraclo",
+    "org_url": "https://github.com/MIRACLO-Project",
+    "org_name": "MIRACLO-Project",
+    "links": [
+      "https://t.me/MIRACLO_Project"
+    ],
+    "logo_file": "miraclo.png"
+  },
+  {
+    "name": "nasgoros",
+    "slug": "nasgoros",
+    "org_url": "https://github.com/nasgoros",
+    "org_name": "nasgoros",
+    "links": [],
+    "logo_file": "nasgoros.png"
+  },
+  {
+    "name": "Neoteric-OS",
+    "slug": "neotericos",
+    "org_url": "https://github.com/Neoteric-OS",
+    "org_name": "Neoteric-OS",
+    "links": [
+      "https://t.me/neotericfam",
+      "https://t.me/NeotericOS_Chat"
+    ],
+    "logo_file": "neotericos.png"
+  },
+  {
+    "name": "NervAOSP",
+    "slug": "nervaosp",
+    "org_url": "https://github.com/NervAOSP",
+    "org_name": "NervAOSP",
+    "links": [],
+    "logo_file": "nervaosp.png"
+  },
+  {
+    "name": "Nucleus OS",
+    "slug": "nucleusos",
+    "org_url": "https://github.com/nucleus-os",
+    "org_name": "nucleus-os",
+    "links": [],
+    "logo_file": "nucleusos.png"
+  },
+  {
+    "name": "omnirom",
+    "slug": "omnirom",
+    "org_url": "https://github.com/omnirom",
+    "org_name": "omnirom",
+    "links": [
+      "https://t.me/OmniROM_Community"
+    ],
+    "logo_file": "omnirom.png"
+  },
+  {
+    "name": "Paranoid (AOSPA)",
+    "slug": "paranoidaospa",
+    "org_url": "https://github.com/AOSPA",
+    "org_name": "AOSPA",
+    "links": [
+      "https://t.me/stayparanoid",
+      "https://t.me/paranoidandroidofficial"
+    ],
+    "logo_file": "paranoidaospa.png"
+  },
+  {
+    "name": "PenguinOS",
+    "slug": "penguinos",
+    "org_url": "https://github.com/Project-PenguinOS",
+    "org_name": "Project-PenguinOS",
+    "links": [],
+    "logo_file": "penguinos.png"
+  },
+  {
+    "name": "PenguinOS-Vanilla",
+    "slug": "penguinosvanilla",
+    "org_url": "https://github.com/PenguinOS-Vanilla",
+    "org_name": "PenguinOS-Vanilla",
+    "links": [],
+    "logo_file": "penguinosvanilla.png"
+  },
+  {
+    "name": "PixelBuilds",
+    "slug": "pixelbuilds",
+    "org_url": "https://github.com/PixelBuildsROM",
+    "org_name": "PixelBuildsROM",
+    "links": [
+      "https://t.me/PixelBuildsChat",
+      "https://t.me/PixelBuildsUpdates",
+      "https://t.me/PixelBuildsReleases"
+    ],
+    "logo_file": "pixelbuilds.png"
+  },
+  {
+    "name": "PixelLines",
+    "slug": "pixellines",
+    "org_url": "https://github.com/PixelLines",
+    "org_name": "PixelLines",
+    "links": [
+      "https://t.me/PixelL1nes"
+    ],
+    "logo_file": "pixellines.png"
+  },
+  {
+    "name": "PixelOS",
+    "slug": "pixelos",
+    "org_url": "https://github.com/PixelOS-AOSP",
+    "org_name": "PixelOS-AOSP",
+    "links": [
+      "https://t.me/pixeloschat",
+      "https://t.me/PixelOSOfficial"
+    ],
+    "logo_file": "pixelos.png"
+  },
+  {
+    "name": "PixelOS-CLO",
+    "slug": "pixelosclo",
+    "org_url": "https://github.com/PixelOS-CLO",
+    "org_name": "PixelOS-CLO",
+    "links": [],
+    "logo_file": "pixelosclo.png"
+  },
+  {
+    "name": "PixelOS-GM",
+    "slug": "pixelosgm",
+    "org_url": "https://github.com/pos-gm",
+    "org_name": "pos-gm",
+    "links": [],
+    "logo_file": "pixelosgm.png"
+  },
+  {
+    "name": "Project CiRCLE",
+    "slug": "projectcircle",
+    "org_url": "https://github.com/ProjectCiRCLE-ROM",
+    "org_name": "ProjectCiRCLE-ROM",
+    "links": [
+      "https://t.me/ProjectCiRCLE_ROM"
+    ],
+    "logo_file": "projectcircle.png"
+  },
+  {
+    "name": "Project Flare",
+    "slug": "projectflare",
+    "org_url": "https://github.com/Project-Flare-Staging",
+    "org_name": "Project-Flare-Staging",
+    "links": [
+      "https://t.me/ProjectFlare_SG",
+      "https://t.me/ProjectFlareChannel"
+    ],
+    "logo_file": "projectflare.png"
+  },
+  {
+    "name": "Project Infinity X",
+    "slug": "projectinfinityx",
+    "org_url": "https://github.com/ProjectInfinity-X",
+    "org_name": "ProjectInfinity-X",
+    "links": [
+      "https://t.me/InfinityXGroup",
+      "https://t.me/InfinityXUpdate",
+      "https://t.me/ProjectInfinityX"
+    ],
+    "logo_file": "projectinfinityx.png"
+  },
+  {
+    "name": "Project Mist OS",
+    "slug": "projectmistos",
+    "org_url": "https://github.com/Project-Mist-OS",
+    "org_name": "Project-Mist-OS",
+    "links": [
+      "https://t.me/MistOSDiscussion",
+      "https://t.me/MistOSUpdate"
+    ],
+    "logo_file": "projectmistos.png"
+  },
+  {
+    "name": "Project Nirwana",
+    "slug": "projectnirwana",
+    "org_url": "https://github.com/ProjectNirwana",
+    "org_name": "ProjectNirwana",
+    "links": [],
+    "logo_file": "projectnirwana.png"
+  },
+  {
+    "name": "Project Sakura",
+    "slug": "projectsakura",
+    "org_url": "https://github.com/ProjectSakura",
+    "org_name": "ProjectSakura",
+    "links": [
+      "https://t.me/ProjectSakura",
+      "https://t.me/ProjectSakuraUpdates",
+      "https://t.me/ProjectSakuraNews"
+    ],
+    "logo_file": "projectsakura.png"
+  },
+  {
+    "name": "Project Shinkai",
+    "slug": "projectshinkai",
+    "org_url": "https://github.com/ShinkaiProject",
+    "org_name": "ShinkaiProject",
+    "links": [
+      "https://t.me/Mnskkyy"
+    ],
+    "logo_file": "projectshinkai.png"
+  },
+  {
+    "name": "Pulse-OS",
+    "slug": "pulseos",
+    "org_url": "https://github.com/Pulse-OS",
+    "org_name": "Pulse-OS",
+    "links": [],
+    "logo_file": "pulseos.png"
+  },
+  {
+    "name": "Raven AOSP",
+    "slug": "ravenaosp",
+    "org_url": "https://github.com/Raven-AOSP",
+    "org_name": "Raven-AOSP",
+    "links": [],
+    "logo_file": "ravenaosp.png"
+  },
+  {
+    "name": "RealizeUI",
+    "slug": "realizeui",
+    "org_url": "https://github.com/RealizeUI",
+    "org_name": "RealizeUI",
+    "links": [],
+    "logo_file": "realizeui.png"
+  },
+  {
+    "name": "Rising Revived OSS",
+    "slug": "risingrevivedoss",
+    "org_url": "https://github.com/RisingOS-Revived",
+    "org_name": "RisingOS-Revived",
+    "links": [
+      "https://t.me/RisingRevived"
+    ],
+    "logo_file": "risingrevivedoss.png"
+  },
+  {
+    "name": "RuriseOS",
+    "slug": "ruriseos",
+    "org_url": "https://github.com/RuriseOS",
+    "org_name": "RuriseOS",
+    "links": [],
+    "logo_file": "ruriseos.png"
+  },
+  {
+    "name": "rwiceAOSP",
+    "slug": "rwiceaosp",
+    "org_url": "https://github.com/Crescence-AOSP",
+    "org_name": "Crescence-AOSP",
+    "links": [
+      "https://t.me/rwiceAOSP"
+    ],
+    "logo_file": "rwiceaosp.png"
+  },
+  {
+    "name": "SHIFTPHONES",
+    "slug": "shiftphones",
+    "org_url": "https://github.com/SHIFTPHONES",
+    "org_name": "SHIFTPHONES",
+    "links": [],
+    "logo_file": "shiftphones.png"
+  },
+  {
+    "name": "StatiXOS",
+    "slug": "statixos",
+    "org_url": "https://github.com/StatiXOS",
+    "org_name": "StatiXOS",
+    "links": [
+      "https://t.me/StatiXOSReleases"
+    ],
+    "logo_file": "statixos.png"
+  },
+  {
+    "name": "StatiXOS-Staging",
+    "slug": "statixosstaging",
+    "org_url": "https://github.com/stx-staging",
+    "org_name": "stx-staging",
+    "links": [
+      "https://t.me/StatiXOSReleases"
+    ],
+    "logo_file": "statixosstaging.png"
+  },
+  {
+    "name": "SunOS Project",
+    "slug": "sunosproject",
+    "org_url": "https://github.com/SunOS-Project",
+    "org_name": "SunOS-Project",
+    "links": [],
+    "logo_file": "sunosproject.png"
+  },
+  {
+    "name": "Superior OS",
+    "slug": "superioros",
+    "org_url": "https://github.com/SuperiorOS",
+    "org_name": "SuperiorOS",
+    "links": [
+      "https://t.me/superioros",
+      "https://t.me/superior_os"
+    ],
+    "logo_file": "superioros.png"
+  },
+  {
+    "name": "The Clover Project",
+    "slug": "thecloverproject",
+    "org_url": "https://github.com/The-Clover-Project",
+    "org_name": "The-Clover-Project",
+    "links": [
+      "https://t.me/TheCloverProject_Chat",
+      "https://t.me/The_Clover_Project"
+    ],
+    "logo_file": "thecloverproject.png"
+  },
+  {
+    "name": "The Diva Project",
+    "slug": "thedivaproject",
+    "org_url": "https://github.com/The-Diva-Project",
+    "org_name": "The-Diva-Project",
+    "links": [
+      "https://t.me/AlexMainMandy"
+    ],
+    "logo_file": "thedivaproject.png"
+  },
+  {
+    "name": "The XPerience Project",
+    "slug": "thexperienceproject",
+    "org_url": "https://github.com/TheXPerienceProject",
+    "org_name": "TheXPerienceProject",
+    "links": [
+      "https://t.me/xperiencechat",
+      "https://t.me/xperiencereleases"
+    ],
+    "logo_file": "thexperienceproject.png"
+  },
+  {
+    "name": "UOTAN OS",
+    "slug": "uotanos",
+    "org_url": "https://github.com/UOTAN-OS",
+    "org_name": "UOTAN-OS",
+    "links": [],
+    "logo_file": "uotanos.png"
+  },
+  {
+    "name": "uwuAOSP",
+    "slug": "uwuaosp",
+    "org_url": "https://github.com/uwuAOSP",
+    "org_name": "uwuAOSP",
+    "links": [],
+    "logo_file": "uwuaosp.png"
+  },
+  {
+    "name": "VoltageOS",
+    "slug": "voltageos",
+    "org_url": "https://github.com/VoltageOS",
+    "org_name": "VoltageOS",
+    "links": [
+      "https://t.me/voltageos",
+      "https://t.me/voltageosannouncements",
+      "https://t.me/voltageos",
+      "https://t.me/VoltageOSSupport"
+    ],
+    "logo_file": "voltageos.png"
+  },
+  {
+    "name": "WitAqua",
+    "slug": "witaqua",
+    "org_url": "https://github.com/WitAqua",
+    "org_name": "WitAqua",
+    "links": [],
+    "logo_file": "witaqua.png"
+  },
+  {
+    "name": "xdroid-oss",
+    "slug": "xdroidoss",
+    "org_url": "https://github.com/xdroid-oss",
+    "org_name": "xdroid-oss",
+    "links": [
+      "https://t.me/xdroid_chat",
+      "https://t.me/xdroidOSS",
+      "https://t.me/xdroid_update"
+    ],
+    "logo_file": "xdroidoss.png"
+  },
+  {
+    "name": "YAAP",
+    "slug": "yaap",
+    "org_url": "https://github.com/YAAP",
+    "org_name": "YAAP",
+    "links": [
+      "https://t.me/yaapcommon",
+      "https://t.me/yaapupdates"
+    ],
+    "logo_file": "yaap.png"
+  },
+  {
+    "name": "YAAPex",
+    "slug": "yaapex",
+    "org_url": "https://github.com/yaapex",
+    "org_name": "yaapex",
+    "links": [],
+    "logo_file": "yaapex.png"
+  }
+]
