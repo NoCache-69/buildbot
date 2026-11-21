@@ -483,6 +483,29 @@ def gdrive_make_public(file_id, token):
         print(f"[GDrive] Note: Could not set public permission on {file_id}: {e}", file=sys.stderr)
         return False
 
+def make_gofile_content_public(content_id, token):
+    if not content_id or not token:
+        return
+    try:
+        url = f"https://api.gofile.io/contents/{content_id}/update"
+        payload = json.dumps({"attribute": "public", "attributeValue": True}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0"
+            },
+            method="PUT"
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("status") == "ok":
+                print(f"[Gofile] Verified public visibility on {content_id}")
+    except Exception as e:
+        print(f"[Gofile] Notice: could not set public on {content_id}: {e}", file=sys.stderr)
+
 def upload_to_gofile(file_path, cfg=None):
     if not os.path.exists(file_path):
         print(f"[Gofile] Error: file not found: {file_path}", file=sys.stderr)
@@ -514,6 +537,13 @@ def upload_to_gofile(file_path, cfg=None):
                 resp = json.loads(result.stdout)
                 if resp.get("status") == "ok":
                     data = resp.get("data", {})
+                    if token:
+                        if data.get("id"):
+                            make_gofile_content_public(data.get("id"), token)
+                        if data.get("parentFolder"):
+                            make_gofile_content_public(data.get("parentFolder"), token)
+                        elif folder_id:
+                            make_gofile_content_public(folder_id, token)
                     link = data.get("downloadPage")
                     if not link and data.get("code"):
                         link = f"https://gofile.io/d/{data['code']}"
@@ -569,6 +599,13 @@ def upload_to_gofile(file_path, cfg=None):
                     resp = json.loads(result.stdout)
                     if resp.get("status") == "ok":
                         data = resp.get("data", {})
+                        if token:
+                            if data.get("id"):
+                                make_gofile_content_public(data.get("id"), token)
+                            if data.get("parentFolder"):
+                                make_gofile_content_public(data.get("parentFolder"), token)
+                            elif folder_id:
+                                make_gofile_content_public(folder_id, token)
                         link = data.get("downloadPage")
                         if not link and data.get("code"):
                             link = f"https://gofile.io/d/{data['code']}"
@@ -2986,6 +3023,12 @@ if __name__ == "__main__":
     # Ensure config loading
     port = CONFIG.get("port", DEFAULT_PORT)
     
+    # Verify GoFile folder public visibility
+    gf_token = CONFIG.get("gofile_token")
+    gf_folder = CONFIG.get("gofile_folder_id")
+    if gf_token and gf_folder:
+        threading.Thread(target=make_gofile_content_public, args=(gf_folder, gf_token), daemon=True).start()
+
     # 1. Spawn Telegram Bot Polling in background
     threading.Thread(target=telegram_polling, daemon=True).start()
     
