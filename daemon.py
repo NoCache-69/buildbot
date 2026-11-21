@@ -3015,6 +3015,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"status": "ok"}).encode())
 
 def run_http_server(port):
+    ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer(('127.0.0.1', port), APIHandler)
     print(f"[API] HTTP Server listening on http://127.0.0.1:{port}")
     server.serve_forever()
