@@ -707,7 +707,14 @@ def upload_to_gdrive(file_path, cfg=None, ctx=None):
             dest += "/"
         print(f"[GDrive] Using Rclone to copy {fname} to {dest}...")
         try:
-            copy_res = subprocess.run(["rclone", "copy", "--drive-chunk-size", "64M", file_path, dest], capture_output=True, text=True)
+            rclone_cmd = [
+                "rclone", "copy",
+                "--drive-chunk-size", "256M",
+                "--drive-upload-cutoff", "256M",
+                "--drive-pacer-min-sleep", "10ms",
+                file_path, dest
+            ]
+            copy_res = subprocess.run(rclone_cmd, capture_output=True, text=True, timeout=900)
             if copy_res.returncode == 0:
                 print(f"[GDrive] Uploaded {fname} successfully via Rclone to {dest}")
                 file_dest = f"{dest}{fname}"
