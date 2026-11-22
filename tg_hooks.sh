@@ -161,20 +161,6 @@ if [ -n "${BASH_VERSION:-}" ]; then
     export -f _tg_make_wrapper
 fi
 
-# Intercept 'unset' to shield 'm' and 'mka' from being destroyed when build/envsetup.sh is sourced
-unset() {
-    local args=()
-    for arg in "$@"; do
-        if [ "$arg" = "m" ] || [ "$arg" = "mka" ]; then
-            continue
-        fi
-        args+=("$arg")
-    done
-    if [ ${#args[@]} -gt 0 ]; then
-        builtin unset "${args[@]}"
-    fi
-}
-
 # Define and export fallback functions
 m() {
     _tg_m_wrapper "$@"
@@ -190,26 +176,34 @@ make() {
     fi
 }
 
+# Safe no-op and auto-cleanup in case any subshell still evaluates _tg_reassert_hooks
 _tg_reassert_hooks() {
-    export m=""
-    m() { _tg_m_wrapper "$@"; }
-    mka() { _tg_mka_wrapper "$@"; }
-    alias m='_tg_m_wrapper' 2>/dev/null || true
-    alias mka='_tg_mka_wrapper' 2>/dev/null || true
-    alias make='_tg_make_wrapper' 2>/dev/null || true
+    if [[ "${PROMPT_COMMAND:-}" == *"_tg_reassert_hooks"* ]]; then
+        PROMPT_COMMAND="${PROMPT_COMMAND//_tg_reassert_hooks;/}"
+        PROMPT_COMMAND="${PROMPT_COMMAND//_tg_reassert_hooks/}"
+        if [ -z "$PROMPT_COMMAND" ]; then
+            unset PROMPT_COMMAND
+        fi
+    fi
+    return 0
 }
 
 # Export fallback functions for scripts and subshells
 if [ -n "${BASH_VERSION:-}" ]; then
-    export -f unset
     export -f m
     export -f mka
     export -f make
-    export -f _tg_reassert_hooks
+    export -f _tg_reassert_hooks 2>/dev/null || true
 
-    # Re-assert hooks before every interactive prompt in case envsetup.sh was sourced
-    if [[ "${PROMPT_COMMAND:-}" != *"_tg_reassert_hooks"* ]]; then
-        export PROMPT_COMMAND="_tg_reassert_hooks;${PROMPT_COMMAND:-}"
+    # Clean up lingering _tg_reassert_hooks from PROMPT_COMMAND immediately
+    if [[ "${PROMPT_COMMAND:-}" == *"_tg_reassert_hooks"* ]]; then
+        PROMPT_COMMAND="${PROMPT_COMMAND//_tg_reassert_hooks;/}"
+        PROMPT_COMMAND="${PROMPT_COMMAND//_tg_reassert_hooks/}"
+        if [ -z "$PROMPT_COMMAND" ]; then
+            unset PROMPT_COMMAND
+        else
+            export PROMPT_COMMAND
+        fi
     fi
 fi
 
