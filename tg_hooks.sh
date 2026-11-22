@@ -161,6 +161,9 @@ if [ -n "${BASH_VERSION:-}" ]; then
     export -f _tg_make_wrapper
 fi
 
+# Temporarily remove aliases so function definitions below are not alias-expanded
+unalias m mka make 2>/dev/null || true
+
 # Define and export fallback functions
 m() {
     _tg_m_wrapper "$@"
