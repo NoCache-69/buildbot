@@ -506,7 +506,7 @@ def make_gofile_content_public(content_id, token):
     except Exception as e:
         print(f"[Gofile] Notice: could not set public on {content_id}: {e}", file=sys.stderr)
 
-def upload_to_gofile(file_path, cfg=None):
+def upload_to_gofile(file_path, cfg=None, separate=True):
     if not os.path.exists(file_path):
         print(f"[Gofile] Error: file not found: {file_path}", file=sys.stderr)
         return None
@@ -516,13 +516,15 @@ def upload_to_gofile(file_path, cfg=None):
     if not token and isinstance(c.get("gofile"), dict):
         token = c["gofile"].get("token")
 
-    folder_id = c.get("gofile_folder_id")
-    if not folder_id and isinstance(c.get("gofile"), dict):
-        folder_id = c["gofile"].get("folder_id")
+    folder_id = None
+    if not separate:
+        folder_id = c.get("gofile_folder_id")
+        if not folder_id and isinstance(c.get("gofile"), dict):
+            folder_id = c["gofile"].get("folder_id")
 
     fname = os.path.basename(file_path)
     fsize = os.path.getsize(file_path)
-    print(f"[Gofile] Uploading {fname} (size: {fsize} bytes)...")
+    print(f"[Gofile] Uploading {fname} (size: {fsize} bytes, separate={separate})...")
 
     # 1. Try modern upload.gofile.io endpoint first
     try:
@@ -794,14 +796,14 @@ def upload_file_to_host(file_path, cfg=None, ctx=None):
     host = normalize_upload_host(c.get("upload_host", "gofile"))
 
     if host == "gofile":
-        return upload_to_gofile(file_path, c)
+        return upload_to_gofile(file_path, c, separate=True)
     elif host == "pixeldrain":
         return upload_to_pixeldrain(file_path, c)
     elif host == "gdrive":
         return upload_to_gdrive(file_path, c, ctx)
     else:
         print(f"[Upload] Unknown host '{host}', falling back to Gofile", file=sys.stderr)
-        return upload_to_gofile(file_path, c)
+        return upload_to_gofile(file_path, c, separate=True)
 
 # Global variables
 CONFIG = load_config()
@@ -2638,8 +2640,8 @@ def process_post_build(top_path, ctx, exit_code):
         def _upload_primary(item):
             if host_key == "gdrive":
                 if not item["path"].lower().endswith(".zip"):
-                    # Upload images and other non-zip files to Gofile
-                    gf_url = upload_to_gofile(item["path"], CONFIG)
+                    # Upload images and other non-zip files to Gofile separately
+                    gf_url = upload_to_gofile(item["path"], CONFIG, separate=True)
                     if gf_url:
                         item["link"] = gf_url
                         item["host_label"] = "Gofile"
