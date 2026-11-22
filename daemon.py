@@ -718,14 +718,16 @@ def upload_to_gdrive(file_path, cfg=None, ctx=None):
             if copy_res.returncode == 0:
                 print(f"[GDrive] Uploaded {fname} successfully via Rclone to {dest}")
                 file_dest = f"{dest}{fname}"
-                link_res = subprocess.run(["rclone", "link", file_dest], capture_output=True, text=True, timeout=10)
-                if link_res.returncode == 0 and link_res.stdout.strip().startswith("http"):
-                    link = link_res.stdout.strip()
-                    print(f"[GDrive] Generated link via Rclone: {link}")
-                    return link
-                else:
-                    index_link = get_index_url(fname, c, ctx)
-                    return index_link or dest
+                try:
+                    link_res = subprocess.run(["rclone", "link", file_dest], capture_output=True, text=True, timeout=10)
+                    if link_res.returncode == 0 and link_res.stdout.strip().startswith("http"):
+                        link = link_res.stdout.strip()
+                        print(f"[GDrive] Generated link via Rclone: {link}")
+                        return link
+                except Exception as link_err:
+                    print(f"[GDrive] Notice: 'rclone link' timed out or failed: {link_err}", file=sys.stderr)
+                index_link = get_index_url(fname, c, ctx)
+                return index_link or dest
             else:
                 print(f"[GDrive] Rclone copy failed: {copy_res.stderr.strip()}", file=sys.stderr)
         except Exception as e:

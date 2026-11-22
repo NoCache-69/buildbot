@@ -161,14 +161,21 @@ if [ -n "${BASH_VERSION:-}" ]; then
     export -f _tg_make_wrapper
 fi
 
-# In modern AOSP (Android 14+), build/envsetup.sh explicitly executes `unset m`.
-# In bash, `unset m` without flags unsets the variable `m` if one exists,
-# leaving any function `m` intact!
-# By exporting an environment variable `m=""`, `unset m` in envsetup.sh consumes
-# the variable, allowing our function `m()` to survive and intercept script builds.
-export m=""
+# Intercept 'unset' to shield 'm' and 'mka' from being destroyed when build/envsetup.sh is sourced
+unset() {
+    local args=()
+    for arg in "$@"; do
+        if [ "$arg" = "m" ] || [ "$arg" = "mka" ]; then
+            continue
+        fi
+        args+=("$arg")
+    done
+    if [ ${#args[@]} -gt 0 ]; then
+        builtin unset "${args[@]}"
+    fi
+}
 
-# Define fallback functions for non-interactive scripts
+# Define and export fallback functions
 m() {
     _tg_m_wrapper "$@"
 }
@@ -183,11 +190,27 @@ make() {
     fi
 }
 
-# Export fallback functions for scripts
+_tg_reassert_hooks() {
+    export m=""
+    m() { _tg_m_wrapper "$@"; }
+    mka() { _tg_mka_wrapper "$@"; }
+    alias m='_tg_m_wrapper' 2>/dev/null || true
+    alias mka='_tg_mka_wrapper' 2>/dev/null || true
+    alias make='_tg_make_wrapper' 2>/dev/null || true
+}
+
+# Export fallback functions for scripts and subshells
 if [ -n "${BASH_VERSION:-}" ]; then
+    export -f unset
     export -f m
     export -f mka
     export -f make
+    export -f _tg_reassert_hooks
+
+    # Re-assert hooks before every interactive prompt in case envsetup.sh was sourced
+    if [[ "${PROMPT_COMMAND:-}" != *"_tg_reassert_hooks"* ]]; then
+        export PROMPT_COMMAND="_tg_reassert_hooks;${PROMPT_COMMAND:-}"
+    fi
 fi
 
 # Apply Shell Aliases (taking precedence over functions in interactive shells)
